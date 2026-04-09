@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>CodeBuddy</title>
+    <style>
+      body {
+        width: 340px;
+        margin: 0;
+        padding: 16px;
+        font-family: Arial, sans-serif;
+        background: #ffffff;
+        color: #111827;
+      }
+
+      h1 {
+        margin: 0 0 12px;
+        font-size: 20px;
+      }
+
+      p {
+        margin: 8px 0;
+      }
+
+      textarea {
+        width: 100%;
+        min-height: 120px;
+        box-sizing: border-box;
+        padding: 10px;
+        margin-top: 8px;
+        border: 1px solid #d1d5db;
+        border-radius: 8px;
+        resize: vertical;
+      }
+
+      button {
+        width: 100%;
+        margin-top: 12px;
+        padding: 10px 12px;
+        border: none;
+        border-radius: 8px;
+        background: #111827;
+        color: #ffffff;
+        cursor: pointer;
+      }
+
+      button:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+      }
+
+      .status {
+        min-height: 20px;
+        margin-top: 10px;
+        font-size: 13px;
+        color: #b45309;
+      }
+
+      .output {
+        margin-top: 16px;
+      }
+
+      .output-block {
+        margin-bottom: 12px;
+      }
+
+      .label {
+        display: block;
+        margin-bottom: 4px;
+        font-weight: 700;
+      }
+
+      .value {
+        margin: 0;
+        white-space: pre-wrap;
+        font-size: 13px;
+        line-height: 1.45;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>CodeBuddy</h1>
+    <p id="pageInfo">Open a LeetCode problem</p>
+
+    <textarea
+      id="codeInput"
+      placeholder="Paste your code here..."
+    ></textarea>
+
+    <button id="getHintBtn">Get Hint</button>
+
+    <div id="status" class="status"></div>
+
+    <div class="output">
+      <div class="output-block">
+        <span class="label">Analysis</span>
+        <p id="analysis" class="value"></p>
+      </div>
+      <div class="output-block">
+        <span class="label">Mistake</span>
+        <p id="mistake" class="value"></p>
+      </div>
+      <div class="output-block">
+        <span class="label">Hint 1</span>
+        <p id="hint1" class="value"></p>
+      </div>
+      <div class="output-block">
+        <span class="label">Hint 2</span>
+        <p id="hint2" class="value"></p>
+      </div>
+      <div class="output-block">
+        <span class="label">Hint 3</span>
+        <p id="hint3" class="value"></p>
+      </div>
+    </div>
+
+    <script src="popup.js"></script>
+  </body>
+  </html>
