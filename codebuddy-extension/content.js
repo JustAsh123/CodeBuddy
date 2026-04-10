@@ -19,6 +19,35 @@ const DESCRIPTION_SELECTORS = [
   'main [role="main"] section',
 ];
 
+const LANGUAGE_SELECTORS = [
+  '[data-cy="lang-select"]',
+  'button[aria-label*="language" i]',
+  '[role="combobox"]',
+  'button[aria-haspopup="listbox"]',
+  '[role="button"]',
+];
+
+const LANGUAGE_ALIASES = {
+  Python: "Python",
+  Python3: "Python",
+  Java: "Java",
+  "C++": "C++",
+  C: "C",
+  "C#": "C#",
+  JavaScript: "JavaScript",
+  Javascript: "JavaScript",
+  TypeScript: "TypeScript",
+  Typescript: "TypeScript",
+  Go: "Go",
+  Kotlin: "Kotlin",
+  Rust: "Rust",
+  Swift: "Swift",
+  PHP: "PHP",
+  Ruby: "Ruby",
+  Dart: "Dart",
+  Scala: "Scala",
+};
+
 const PANEL_CSS = `
   :host {
     all: initial;
@@ -148,6 +177,17 @@ const PANEL_CSS = `
     margin: 0;
     font-size: 13px;
     color: #9aa4b2;
+    line-height: 1.45;
+  }
+
+  .cb-feedback {
+    margin: 0;
+    padding: 12px;
+    border-radius: 6px;
+    background: rgba(79, 140, 255, 0.1);
+    border: 1px solid rgba(79, 140, 255, 0.2);
+    color: #cfe0ff;
+    font-size: 13px;
     line-height: 1.45;
   }
 
@@ -317,6 +357,107 @@ function extractDifficulty() {
   return difficultyMatch || "";
 }
 
+function normalizeLanguage(language) {
+  if (typeof language !== "string") {
+    return "";
+  }
+
+  const trimmedLanguage = language.trim().replace(/\s+/g, " ");
+  return LANGUAGE_ALIASES[trimmedLanguage] || "";
+}
+
+function findLanguageInValue(value) {
+  if (typeof value !== "string") {
+    return "";
+  }
+
+  const trimmedValue = value.trim().replace(/\s+/g, " ");
+
+  if (!trimmedValue || trimmedValue.length > 40) {
+    return "";
+  }
+
+  return normalizeLanguage(trimmedValue);
+}
+
+function extractLanguageFromDom() {
+  for (const selector of LANGUAGE_SELECTORS) {
+    let elements = [];
+
+    try {
+      elements = document.querySelectorAll(selector);
+    } catch (error) {
+      console.warn(`Skipping invalid language selector: ${selector}`, error);
+      continue;
+    }
+
+    for (const element of elements) {
+      const language =
+        findLanguageInValue(getElementText(element)) ||
+        findLanguageInValue(element.getAttribute("aria-label") || "") ||
+        findLanguageInValue(element.getAttribute("title") || "");
+
+      if (language) {
+        return language;
+      }
+    }
+  }
+
+  return "";
+}
+
+function inferLanguageFromCode(code = "") {
+  if (!code.trim()) {
+    return "";
+  }
+
+  if (/^\s*def\s+\w+\s*\(/m.test(code) || /\bprint\(/.test(code)) {
+    return "Python";
+  }
+
+  if (/#include\s*</.test(code) || /\bstd::/.test(code) || /\busing namespace std\b/.test(code)) {
+    return "C++";
+  }
+
+  if (/\bSystem\.out\.println\(/.test(code) || /\bpublic\s+class\b/.test(code)) {
+    return "Java";
+  }
+
+  if (/\bconsole\.log\(/.test(code) || /\bfunction\s+\w+\s*\(/.test(code)) {
+    return "JavaScript";
+  }
+
+  if (/\binterface\s+\w+/.test(code) || /:\s*(number|string|boolean|unknown|any)\b/.test(code)) {
+    return "TypeScript";
+  }
+
+  if (/\bConsole\.WriteLine\(/.test(code) || /\bnamespace\s+\w+/.test(code)) {
+    return "C#";
+  }
+
+  if (/^\s*func\s+\w+\s*\(/m.test(code) || /\bfmt\./.test(code)) {
+    return "Go";
+  }
+
+  if (/^\s*fn\s+\w+\s*\(/m.test(code) || /\blet\s+mut\b/.test(code)) {
+    return "Rust";
+  }
+
+  if (/^\s*<\?php/m.test(code)) {
+    return "PHP";
+  }
+
+  if (/^\s*puts\s+/m.test(code) || /\bend\s*$/m.test(code)) {
+    return "Ruby";
+  }
+
+  return "";
+}
+
+function extractLanguage(code = "") {
+  return extractLanguageFromDom() || inferLanguageFromCode(code) || "Unknown";
+}
+
 async function waitForProblemContent(maxAttempts = 8, retryDelayMs = 350) {
   console.log("Waiting for DOM...");
   await waitForDomReady();
@@ -326,6 +467,7 @@ async function waitForProblemContent(maxAttempts = 8, retryDelayMs = 350) {
     description: "",
     code: "",
     difficulty: "",
+    language: "",
   };
 
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
@@ -335,12 +477,14 @@ async function waitForProblemContent(maxAttempts = 8, retryDelayMs = 350) {
     const description = extractDescription();
     const code = extractCode();
     const difficulty = extractDifficulty();
+    const language = extractLanguage(code);
 
     lastSnapshot = {
       title: title || "",
       description: description || "",
       code: code || "",
       difficulty: difficulty || "",
+      language: language || "",
     };
 
     if (lastSnapshot.title && lastSnapshot.description) {
@@ -360,6 +504,7 @@ async function waitForProblemContent(maxAttempts = 8, retryDelayMs = 350) {
     description: lastSnapshot.description || "",
     code: lastSnapshot.code || "",
     difficulty: lastSnapshot.difficulty || "",
+    language: lastSnapshot.language || "",
   };
 }
 
@@ -373,6 +518,7 @@ async function getProblemData() {
     description: data.description || "",
     code: data.code || "",
     difficulty: data.difficulty || "",
+    language: data.language || "",
   };
 }
 
@@ -399,6 +545,7 @@ function sanitizeAttempt(attempt) {
       typeof attempt.hints_used === "number" && attempt.hints_used >= 0 && attempt.hints_used <= 3
         ? attempt.hints_used
         : 0,
+    attempts: Number.isInteger(attempt.attempts) && attempt.attempts > 0 ? attempt.attempts : 1,
     timestamp: typeof attempt.timestamp === "number" ? attempt.timestamp : 0,
   };
 }
@@ -426,9 +573,39 @@ function loadAttempts() {
       return [];
     }
 
-    return parsedAttempts
+    const sanitizedAttempts = parsedAttempts
       .map((attempt) => sanitizeAttempt(attempt))
       .filter((attempt) => attempt && attempt.problem && attempt.timestamp);
+    const dedupedAttempts = [];
+
+    for (const attempt of sanitizedAttempts) {
+      const existingAttemptIndex = dedupedAttempts.findIndex(
+        (entry) => entry.problem === attempt.problem
+      );
+
+      if (existingAttemptIndex === -1) {
+        dedupedAttempts.push(attempt);
+        continue;
+      }
+
+      const existingAttempt = dedupedAttempts[existingAttemptIndex];
+      const latestAttempt =
+        attempt.timestamp >= existingAttempt.timestamp ? attempt : existingAttempt;
+
+      dedupedAttempts[existingAttemptIndex] = {
+        problem: latestAttempt.problem,
+        difficulty: latestAttempt.difficulty || existingAttempt.difficulty,
+        hints_used: latestAttempt.hints_used,
+        attempts: existingAttempt.attempts + attempt.attempts,
+        timestamp: latestAttempt.timestamp,
+      };
+    }
+
+    if (dedupedAttempts.length !== parsedAttempts.length) {
+      saveAttempts(dedupedAttempts);
+    }
+
+    return dedupedAttempts;
   } catch {
     saveAttempts([]);
     return [];
@@ -441,34 +618,39 @@ function saveAttempt(problem, difficulty, hintsUsed, timestamp) {
   }
 
   const attempts = loadAttempts();
-  const duplicateAttempt = attempts.some(
-    (attempt) => attempt.problem === problem && attempt.timestamp === timestamp
-  );
+  const existingAttemptIndex = attempts.findIndex((attempt) => attempt.problem === problem);
 
-  if (!duplicateAttempt) {
+  if (existingAttemptIndex === -1) {
     attempts.push({
       problem,
       difficulty,
       hints_used: hintsUsed,
+      attempts: 1,
       timestamp,
     });
-    saveAttempts(attempts);
+  } else {
+    const existingAttempt = attempts[existingAttemptIndex];
+
+    attempts[existingAttemptIndex] = {
+      ...existingAttempt,
+      difficulty: difficulty || existingAttempt.difficulty,
+      hints_used: hintsUsed,
+      attempts: existingAttempt.attempts + 1,
+      timestamp,
+    };
   }
 
+  saveAttempts(attempts);
   return attempts;
 }
 
 function updateCurrentAttemptHints(hintsUsed) {
-  if (!uiState.currentAttemptTimestamp || !uiState.currentProblem) {
+  if (!uiState.currentProblem) {
     return loadAttempts();
   }
 
   const attempts = loadAttempts();
-  const attemptIndex = attempts.findIndex(
-    (attempt) =>
-      attempt.problem === uiState.currentProblem &&
-      attempt.timestamp === uiState.currentAttemptTimestamp
-  );
+  const attemptIndex = attempts.findIndex((attempt) => attempt.problem === uiState.currentProblem);
 
   if (attemptIndex === -1) {
     return attempts;
@@ -477,23 +659,129 @@ function updateCurrentAttemptHints(hintsUsed) {
   attempts[attemptIndex] = {
     ...attempts[attemptIndex],
     hints_used: hintsUsed,
+    timestamp: uiState.currentAttemptTimestamp || attempts[attemptIndex].timestamp,
   };
 
   saveAttempts(attempts);
   return attempts;
 }
 
+function calculateAverageHints(totalHintsUsed, totalProblems) {
+  if (totalProblems === 0) {
+    return 0;
+  }
+
+  return Number((totalHintsUsed / totalProblems).toFixed(1));
+}
+
 function calculateStats(attempts) {
   const totalProblems = attempts.length;
   const totalHintsUsed = attempts.reduce((sum, attempt) => sum + attempt.hints_used, 0);
-  const averageHints =
-    totalProblems === 0 ? 0 : Number((totalHintsUsed / totalProblems).toFixed(1));
+  const averageHints = calculateAverageHints(totalHintsUsed, totalProblems);
 
   return {
     totalProblems,
     totalHintsUsed,
     averageHints,
   };
+}
+
+function determineSkillLevel(avgHints, totalProblems) {
+  if (totalProblems === 0 || avgHints > 2.5) {
+    return "beginner";
+  }
+
+  if (avgHints < 1) {
+    return "advanced";
+  }
+
+  return "intermediate";
+}
+
+function buildUserProfile(attempts = loadAttempts()) {
+  const stats = calculateStats(attempts);
+
+  return {
+    skill_level: determineSkillLevel(stats.averageHints, stats.totalProblems),
+    avg_hints: stats.averageHints,
+    total_problems: stats.totalProblems,
+  };
+}
+
+function getMentorStyleInstructions(skillLevel) {
+  if (skillLevel === "advanced") {
+    return [
+      "- Be concise",
+      "- Focus on optimization",
+      "- Avoid over-explaining",
+    ].join("\n");
+  }
+
+  if (skillLevel === "intermediate") {
+    return [
+      "- Give balanced hints",
+      "- Use moderate guidance",
+    ].join("\n");
+  }
+
+  return [
+    "- Give more guidance",
+    "- Break hints into smaller steps",
+    "- Use an encouraging tone",
+  ].join("\n");
+}
+
+function buildPersonalizedApproach(userProfile, userApproach = "") {
+  const sections = [];
+  const trimmedApproach = typeof userApproach === "string" ? userApproach.trim() : "";
+
+  if (trimmedApproach) {
+    sections.push(trimmedApproach);
+  }
+
+  sections.push(
+    [
+      "User Profile:",
+      `- Skill Level: ${userProfile.skill_level}`,
+      `- Average Hints Used: ${userProfile.avg_hints}`,
+      `- Total Problems: ${userProfile.total_problems}`,
+      "",
+      "Mentor Guidance:",
+      getMentorStyleInstructions(userProfile.skill_level),
+    ].join("\n")
+  );
+
+  return sections.join("\n\n");
+}
+
+function isHintUsageImproving(attempts) {
+  const sortedAttempts = [...attempts].sort((a, b) => a.timestamp - b.timestamp);
+
+  if (sortedAttempts.length < 2) {
+    return false;
+  }
+
+  const midpoint = Math.floor(sortedAttempts.length / 2);
+  const earlierAttempts = sortedAttempts.slice(0, midpoint);
+  const recentAttempts = sortedAttempts.slice(midpoint);
+
+  if (earlierAttempts.length === 0 || recentAttempts.length === 0) {
+    return false;
+  }
+
+  return calculateStats(recentAttempts).averageHints < calculateStats(earlierAttempts).averageHints;
+}
+
+function getAdaptiveFeedback(attempts, userProfile) {
+  if (isHintUsageImproving(attempts)) {
+    return "You're improving — using fewer hints 👏";
+  }
+
+  if (userProfile.avg_hints > 2.5) {
+    return "Try solving with fewer hints to improve";
+  }
+
+  return "";
 }
 
 function getPanelElements(shadowRoot) {
@@ -503,6 +791,7 @@ function getPanelElements(shadowRoot) {
     analysis: shadowRoot.getElementById("cb-analysis"),
     mistake: shadowRoot.getElementById("cb-mistake"),
     progress: shadowRoot.getElementById("cb-progress"),
+    feedback: shadowRoot.getElementById("cb-feedback"),
     hintUsage: shadowRoot.getElementById("cb-hint-usage"),
     hint1Button: shadowRoot.getElementById("cb-reveal-hint1"),
     hint2Button: shadowRoot.getElementById("cb-reveal-hint2"),
@@ -523,6 +812,11 @@ function getPanelElements(shadowRoot) {
 
 function setPanelStatus(panel, message) {
   panel.status.textContent = message || "";
+}
+
+function setMentorFeedback(panel, message) {
+  panel.feedback.textContent = message || "";
+  panel.feedback.classList.toggle("cb-hidden", !message);
 }
 
 function updateHintUsage(panel) {
@@ -563,7 +857,7 @@ function renderProgress(panel, attempts = loadAttempts()) {
 
     const hints = document.createElement("span");
     hints.className = "cb-meta";
-    hints.textContent = `Hints: ${attempt.hints_used}`;
+    hints.textContent = `Hints: ${attempt.hints_used} | Attempts: ${attempt.attempts}`;
 
     row.appendChild(title);
     row.appendChild(hints);
@@ -650,6 +944,7 @@ function resetStoredProgress(panel) {
     // Fail silently.
   }
 
+  setMentorFeedback(panel, "");
   renderProgress(panel, []);
 }
 
@@ -657,6 +952,7 @@ async function requestAnalysis(panel) {
   panel.button.disabled = true;
   setPanelStatus(panel, "Analyzing...");
   setPanelResults(panel, {});
+  setMentorFeedback(panel, "");
   resetCurrentAttempt(panel);
 
   try {
@@ -673,6 +969,11 @@ async function requestAnalysis(panel) {
       return;
     }
 
+    const attempts = loadAttempts();
+    const userProfile = buildUserProfile(attempts);
+    const adaptiveFeedback = getAdaptiveFeedback(attempts, userProfile);
+    const programmingLanguage = data.language || inferLanguageFromCode(code) || "Unknown";
+
     const response = await fetch(BACKEND_URL, {
       method: "POST",
       headers: {
@@ -681,7 +982,10 @@ async function requestAnalysis(panel) {
       body: JSON.stringify({
         problem: `${data.title}\n${data.description}`,
         user_code: code,
-        user_approach: "",
+        user_approach: buildPersonalizedApproach(
+          userProfile,
+          `Programming Language: ${programmingLanguage}`
+        ),
       }),
     });
 
@@ -692,6 +996,7 @@ async function requestAnalysis(panel) {
     const result = await response.json();
     setPanelResults(panel, result);
     saveCurrentAttempt(panel, data.title, data.difficulty || "");
+    setMentorFeedback(panel, adaptiveFeedback);
     setPanelStatus(panel, "");
   } catch (error) {
     console.error("CodeBuddy analysis error:", error);
@@ -742,6 +1047,7 @@ async function createPanel() {
         <section class="cb-section">
           <h3 class="cb-section-title">Progress</h3>
           <p id="cb-progress" class="cb-section-text"></p>
+          <p id="cb-feedback" class="cb-feedback cb-hidden"></p>
         </section>
 
         <section class="cb-section cb-hints">
