@@ -20,15 +20,18 @@
         <textarea
           id="userApproach"
           class="text-input"
+          name="userApproach"
           rows="4"
-          placeholder="Describe your approach..."
+          autocomplete="off"
+          placeholder="Describe your approach…"
         ></textarea>
         <p id="coachNote" class="callout hidden"></p>
         <div class="action-group">
-          <button id="getHintBtn" class="button">Get Hint</button>
-          <button id="regenerateBtn" class="button secondary hidden">Regenerate Hint</button>
+          <button id="getHintBtn" class="button">Analyze Code</button>
+          <button id="regenerateBtn" class="button secondary hidden">Analyze Again</button>
         </div>
-        <p id="status" class="status"></p>
+        <p id="status" class="status" role="status" aria-live="polite"></p>
+        <p class="trust-note">AI may occasionally be incorrect. Use hints as guidance.</p>
       </section>
 
       <section class="card">

@@ -6,10 +6,23 @@ import OpenAI from "openai";
 dotenv.config();
 
 const app = express();
-const PORT = 3000;
+const PORT = Number(process.env.PORT) || 3000;
+const REQUEST_BODY_LIMIT = "1mb";
+const OPENAI_TIMEOUT_MS = 15000;
+const MAX_OPENAI_ATTEMPTS = 3;
+const VALID_CONFIDENCE_VALUES = new Set(["high", "medium", "low"]);
+const BASE_FALLBACK_HINTS = Object.freeze({
+  analysis: "We couldn't analyze the code right now.",
+  mistake: "Please try again in a moment.",
+  progress: "",
+  confidence: "low",
+  hint1: "Re-read the problem statement and confirm what the output should be.",
+  hint2: "Walk through a small example by hand and check each branch of your logic.",
+  hint3: "Review edge cases like empty input, duplicates, and off-by-one boundaries.",
+});
 
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: REQUEST_BODY_LIMIT }));
 
 function getOpenAIClient() {
   return new OpenAI({
@@ -18,39 +31,54 @@ function getOpenAIClient() {
   });
 }
 
-function normalizeHints(data) {
-  const normalizedConfidence =
-    typeof data?.confidence === "string" &&
-    ["high", "medium", "low"].includes(data.confidence.trim().toLowerCase())
-      ? data.confidence.trim().toLowerCase()
-      : "";
+function sanitizeText(value) {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function hasText(value) {
+  return sanitizeText(value).length > 0;
+}
+
+function normalizeConfidence(value) {
+  const normalizedValue = sanitizeText(value).toLowerCase();
+  return VALID_CONFIDENCE_VALUES.has(normalizedValue) ? normalizedValue : "";
+}
+
+function normalizeHints(data = {}) {
+  return {
+    analysis: sanitizeText(data.analysis),
+    mistake: sanitizeText(data.mistake),
+    progress: sanitizeText(data.progress),
+    confidence: normalizeConfidence(data.confidence),
+    hint1: sanitizeText(data.hint1),
+    hint2: sanitizeText(data.hint2),
+    hint3: sanitizeText(data.hint3),
+  };
+}
+
+function buildSafeHints(data = {}) {
+  const normalized = normalizeHints(data);
 
   return {
-    analysis: typeof data?.analysis === "string" ? data.analysis : "",
-    mistake: typeof data?.mistake === "string" ? data.mistake : "",
-    progress: typeof data?.progress === "string" ? data.progress : "",
-    confidence: normalizedConfidence,
-    hint1: typeof data?.hint1 === "string" ? data.hint1 : "",
-    hint2: typeof data?.hint2 === "string" ? data.hint2 : "",
-    hint3: typeof data?.hint3 === "string" ? data.hint3 : "",
+    analysis: normalized.analysis || BASE_FALLBACK_HINTS.analysis,
+    mistake: normalized.mistake || BASE_FALLBACK_HINTS.mistake,
+    progress: normalized.progress || BASE_FALLBACK_HINTS.progress,
+    confidence: normalized.confidence || BASE_FALLBACK_HINTS.confidence,
+    hint1: normalized.hint1 || BASE_FALLBACK_HINTS.hint1,
+    hint2: normalized.hint2 || BASE_FALLBACK_HINTS.hint2,
+    hint3: normalized.hint3 || BASE_FALLBACK_HINTS.hint3,
   };
 }
 
 function buildFallbackHints(overrides = {}) {
-  return normalizeHints({
-    analysis: "Unable to analyze the response right now.",
-    mistake: "The AI response could not be parsed safely.",
-    progress: "",
-    confidence: "low",
-    hint1: "",
-    hint2: "",
-    hint3: "",
+  return buildSafeHints({
+    ...BASE_FALLBACK_HINTS,
     ...overrides,
   });
 }
 
-function parseJsonCandidate(candidate, label) {
-  if (!candidate) {
+function parseJsonCandidate(candidate) {
+  if (!hasText(candidate)) {
     return null;
   }
 
@@ -58,13 +86,13 @@ function parseJsonCandidate(candidate, label) {
     const parsed = JSON.parse(candidate);
     return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : null;
   } catch (error) {
-    console.error(`JSON PARSE ERROR (${label}):`, error);
+    console.error("Failed to parse AI JSON response:", error);
     return null;
   }
 }
 
 function extractJsonObject(rawText = "") {
-  const trimmedText = typeof rawText === "string" ? rawText.trim() : "";
+  const trimmedText = sanitizeText(rawText);
 
   if (!trimmedText) {
     return "";
@@ -123,34 +151,25 @@ function extractJsonObject(rawText = "") {
 }
 
 function parseAiResponse(rawText = "") {
-  console.log("AI RAW RESPONSE:", rawText);
-
-  const directParse = parseJsonCandidate(rawText, "direct");
+  const directParse = parseJsonCandidate(rawText);
 
   if (directParse) {
-    const normalizedData = normalizeHints(directParse);
-    console.log("PARSED DATA:", normalizedData);
-    return normalizedData;
+    return buildSafeHints(directParse);
   }
 
   const extractedJson = extractJsonObject(rawText);
 
   if (extractedJson) {
-    console.log("AI EXTRACTED JSON:", extractedJson);
-    const extractedParse = parseJsonCandidate(extractedJson, "extracted");
+    const extractedParse = parseJsonCandidate(extractedJson);
 
     if (extractedParse) {
-      const normalizedData = normalizeHints(extractedParse);
-      console.log("PARSED DATA:", normalizedData);
-      return normalizedData;
+      return buildSafeHints(extractedParse);
     }
   }
 
   return buildFallbackHints({
-    analysis: rawText || "The AI response was empty.",
-    mistake: rawText
-      ? "Could not parse structured AI response safely."
-      : "The AI response was empty.",
+    analysis: "We couldn't safely parse the AI response.",
+    mistake: hasText(rawText) ? "The AI returned an unexpected response format." : "The AI response was empty.",
   });
 }
 
@@ -196,22 +215,37 @@ function extractProgrammingLanguage(userCode = "", userApproach = "") {
   return "Unknown";
 }
 
-async function getHints(problem, user_code, user_approach) {
+async function withTimeout(promise, timeoutMs, label) {
+  let timeoutId;
+
+  const timeoutPromise = new Promise((_, reject) => {
+    timeoutId = setTimeout(() => {
+      reject(new Error(`${label} timed out after ${timeoutMs}ms`));
+    }, timeoutMs);
+  });
+
+  try {
+    return await Promise.race([promise, timeoutPromise]);
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+async function getHints(problem, userCode, userApproach) {
   const client = getOpenAIClient();
+  const programmingLanguage = extractProgrammingLanguage(userCode, userApproach);
   let lastError;
-  const programmingLanguage = extractProgrammingLanguage(user_code, user_approach);
 
-  for (let attempt = 1; attempt <= 3; attempt += 1) {
+  for (let attempt = 1; attempt <= MAX_OPENAI_ATTEMPTS; attempt += 1) {
     try {
-      console.log(`Calling OpenAI... Attempt ${attempt}`);
-
-      const response = await client.chat.completions.create({
-        model: "llama-3.1-8b-instant",
-        temperature: 0.2,
-        messages: [
-          {
-            role: "system",
-            content: `You are an expert coding mentor.
+      const response = await withTimeout(
+        client.chat.completions.create({
+          model: "llama-3.1-8b-instant",
+          temperature: 0.2,
+          messages: [
+            {
+              role: "system",
+              content: `You are an expert coding mentor.
 
 CRITICAL RULES:
 - You are NOT always correct - avoid overconfidence
@@ -227,17 +261,17 @@ GUIDELINES:
 - Prefer correctness over confidence
 - Return ONLY valid JSON
 - Do not include markdown, code fences, or extra text outside JSON`,
-          },
-          {
-            role: "user",
-            content: `Problem:
+            },
+            {
+              role: "user",
+              content: `Problem:
 ${problem}
 
 User Code:
-${user_code}
+${userCode}
 
 User Approach:
-${user_approach}
+${userApproach}
 
 Programming Language:
 ${programmingLanguage}
@@ -267,30 +301,34 @@ RULES:
 - Do NOT invent errors
 - Keep hints short (1-2 sentences)
 - Return ONLY valid JSON with exactly these keys`,
-          },
-        ],
-      });
+            },
+          ],
+        }),
+        OPENAI_TIMEOUT_MS,
+        "AI analysis"
+      );
 
-      console.log("OPENAI RESPONSE:", response);
-      console.log("AI CONTENT:", response.choices?.[0]?.message?.content);
-
-      const rawText = response.choices?.[0]?.message?.content?.trim() || "";
-      console.log("Parsing AI response...");
+      const rawText = sanitizeText(response.choices?.[0]?.message?.content);
       return parseAiResponse(rawText);
     } catch (error) {
       lastError = error;
-      console.error(`OPENAI CALL ERROR (attempt ${attempt}):`, error);
-
-      if (attempt < 3) {
-        console.log(`Retrying OpenAI call... Attempt ${attempt + 1}`);
-      }
+      console.error(`AI analysis attempt ${attempt} failed:`, error);
     }
   }
 
-  console.error("Returning fallback after repeated OpenAI failures:", lastError);
   return buildFallbackHints({
-    analysis: "The mentor service could not complete this request.",
-    mistake: lastError?.message || "Failed to generate hints",
+    analysis: "We couldn't analyze the code right now.",
+    mistake: lastError?.message || "The mentor service was unavailable.",
+  });
+}
+
+function buildValidationFallback(message) {
+  return buildFallbackHints({
+    analysis: "We couldn't analyze this request yet.",
+    mistake: message,
+    hint1: "Open a LeetCode problem and make sure the problem statement is loaded.",
+    hint2: "Write some code in the editor before asking for analysis.",
+    hint3: "Try the request again after the page finishes loading.",
   });
 }
 
@@ -304,52 +342,69 @@ app.get("/test", (req, res) => {
 
 app.post("/get-hints", async (req, res) => {
   try {
-    console.log("REQ BODY:", req.body);
-
-    const { problem, user_code, user_approach = "" } = req.body;
-
-    console.log("PROBLEM:", problem);
-    console.log("USER CODE:", user_code);
-    console.log("USER APPROACH:", user_approach);
-
-    if (!problem || !user_code) {
-      return res.status(400).json({
-        error: "Missing required fields",
-      });
-    }
+    const { problem, user_code: userCode, user_approach: userApproach = "" } = req.body || {};
 
     if (
       typeof problem !== "string" ||
-      typeof user_code !== "string" ||
-      typeof user_approach !== "string"
+      typeof userCode !== "string" ||
+      typeof userApproach !== "string"
     ) {
-      return res.status(400).json({
-        error: "problem, user_code, and user_approach must all be strings",
-      });
+      return res
+        .status(400)
+        .json(buildValidationFallback("Problem, user_code, and user_approach must be strings."));
+    }
+
+    const normalizedProblem = problem.trim();
+    const normalizedUserCode = userCode.trim();
+
+    if (!normalizedProblem || !normalizedUserCode) {
+      return res
+        .status(400)
+        .json(buildValidationFallback("Problem text and user code are required before analysis."));
     }
 
     if (!process.env.GROQ_API_KEY) {
       console.error("GROQ_API_KEY is not configured");
       return res.json(
         buildFallbackHints({
-          analysis: "The mentor service is not configured right now.",
-          mistake: "GROQ_API_KEY is missing.",
+          analysis: "The mentor service isn't configured right now.",
+          mistake: "The server is missing its API key.",
         })
       );
     }
 
-    const hints = await getHints(problem, user_code, user_approach);
+    const hints = await getHints(normalizedProblem, normalizedUserCode, userApproach);
     return res.json(hints);
   } catch (error) {
-    console.error("Error generating hints:", error);
-
+    console.error("Unexpected /get-hints error:", error);
     return res.json(
       buildFallbackHints({
         analysis: "The mentor service hit an unexpected error.",
-        mistake: error.message || "Unknown error",
+        mistake: error?.message || "Unknown error",
       })
     );
   }
+});
+
+app.use((error, req, res, next) => {
+  if (res.headersSent) {
+    next(error);
+    return;
+  }
+
+  const isJsonParseError =
+    error instanceof SyntaxError || error?.type === "entity.parse.failed";
+
+  console.error("Unhandled API error:", error);
+
+  res.status(isJsonParseError ? 400 : 500).json(
+    buildFallbackHints({
+      analysis: "We couldn't analyze this request right now.",
+      mistake: isJsonParseError
+        ? "The request body must be valid JSON."
+        : "An unexpected server error occurred.",
+    })
+  );
 });
 
 app.listen(PORT, () => {

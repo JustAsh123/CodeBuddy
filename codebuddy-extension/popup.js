@@ -1,3 +1,42 @@
+const BACKEND_URL = "http://localhost:3000/get-hints";
+const FETCH_TIMEOUT_MS = 15000;
+const PROBLEM_URL_PREFIX = "https://leetcode.com/problems/";
+const BUTTON_LABELS = {
+  primary: "Analyze Code",
+  secondary: "Analyze Again",
+  loading: "Analyzing...",
+};
+const STATUS_MESSAGES = {
+  loading: "Analyzing your code...",
+  invalidPage: "Open a LeetCode problem to use CodeBuddy.",
+  unreadableProblem: "We couldn't read this problem. Refresh the page and try again.",
+  noCode: "Write some code before analyzing.",
+  apiFailure: "Couldn't analyze your code. Please try again.",
+};
+const EMPTY_OUTPUT = {
+  analysis: "Run an analysis to see what CodeBuddy notices.",
+  mistake: "Potential issues will appear here after analysis.",
+};
+const LANGUAGE_NOTICE =
+  "We couldn't confidently detect the editor language, so the feedback may be less precise.";
+const SUPPORTED_LANGUAGES = new Set([
+  "Python",
+  "Java",
+  "C++",
+  "C",
+  "C#",
+  "JavaScript",
+  "TypeScript",
+  "Go",
+  "Kotlin",
+  "Rust",
+  "Swift",
+  "PHP",
+  "Ruby",
+  "Dart",
+  "Scala",
+]);
+
 const pageInfo = document.getElementById("pageInfo");
 const statusEl = document.getElementById("status");
 const getHintBtn = document.getElementById("getHintBtn");
@@ -22,7 +61,35 @@ function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function setStatus(message) {
+function hasText(value) {
+  return typeof value === "string" && value.trim().length > 0;
+}
+
+function isProblemTab(tab) {
+  return Boolean(tab?.id && tab.url?.startsWith(PROBLEM_URL_PREFIX));
+}
+
+function isSupportedLanguage(language) {
+  return SUPPORTED_LANGUAGES.has(language);
+}
+
+function normalizeResult(data = {}) {
+  return {
+    analysis: hasText(data.analysis) ? data.analysis.trim() : "",
+    mistake: hasText(data.mistake) ? data.mistake.trim() : "",
+    hint1: hasText(data.hint1) ? data.hint1.trim() : "",
+    hint2: hasText(data.hint2) ? data.hint2.trim() : "",
+    hint3: hasText(data.hint3) ? data.hint3.trim() : "",
+  };
+}
+
+function setContentText(element, value, emptyText) {
+  const hasValue = hasText(value);
+  element.textContent = hasValue ? value.trim() : emptyText;
+  element.classList.toggle("empty", !hasValue);
+}
+
+function setStatus(message = "") {
   statusEl.textContent = message;
 }
 
@@ -36,11 +103,21 @@ function setCoachNote(message) {
 }
 
 function setOutput(data = {}) {
-  analysisEl.textContent = data.analysis || "";
-  mistakeEl.textContent = data.mistake || "";
-  hint1El.textContent = data.hint1 || "";
-  hint2El.textContent = data.hint2 || "";
-  hint3El.textContent = data.hint3 || "";
+  const normalized = normalizeResult(data);
+  setContentText(analysisEl, normalized.analysis, EMPTY_OUTPUT.analysis);
+  setContentText(mistakeEl, normalized.mistake, EMPTY_OUTPUT.mistake);
+  hint1El.textContent = normalized.hint1;
+  hint2El.textContent = normalized.hint2;
+  hint3El.textContent = normalized.hint3;
+}
+
+function setLoadingState(isLoading) {
+  getHintBtn.disabled = isLoading;
+  regenerateBtn.disabled = isLoading;
+  getHintBtn.textContent = isLoading ? BUTTON_LABELS.loading : BUTTON_LABELS.primary;
+  regenerateBtn.textContent = isLoading ? BUTTON_LABELS.loading : BUTTON_LABELS.secondary;
+  getHintBtn.setAttribute("aria-busy", String(isLoading));
+  regenerateBtn.setAttribute("aria-busy", String(isLoading));
 }
 
 function updateHintUsage() {
@@ -70,7 +147,7 @@ function enableHints(data) {
   resetHints();
   regenerateBtn.classList.remove("hidden");
 
-  if (data.hint1) {
+  if (hasText(data.hint1)) {
     showHint1Btn.classList.remove("hidden");
   }
 }
@@ -110,11 +187,26 @@ function buildCoachMessage(code, detectedPatterns) {
       : "This looks like O(n^2), can you optimize?";
   }
 
-  if (closeMessage) {
-    return closeMessage;
+  return closeMessage;
+}
+
+function buildCoachContext(code, language) {
+  const detectedPatterns = detectPatterns(code);
+  const messages = [];
+  const patternMessage = buildCoachMessage(code, detectedPatterns);
+
+  if (patternMessage) {
+    messages.push(patternMessage);
   }
 
-  return "";
+  if (!isSupportedLanguage(language)) {
+    messages.push(LANGUAGE_NOTICE);
+  }
+
+  return {
+    detectedPatterns,
+    message: messages.join(" "),
+  };
 }
 
 function getActiveTab() {
@@ -163,12 +255,8 @@ function injectContentScript(tabId) {
 }
 
 async function getTabData(tabId) {
-  console.log("Sending message to content");
-
   try {
-    const response = await sendMessageToContent(tabId, { type: "GET_DATA" });
-    console.log("Received response", response);
-    return response;
+    return await sendMessageToContent(tabId, { type: "GET_DATA" });
   } catch (error) {
     const message = error.message || "";
     const needsInjection =
@@ -179,14 +267,31 @@ async function getTabData(tabId) {
       throw error;
     }
 
-    console.warn("Content script not ready, reinjecting...", message);
     await injectContentScript(tabId);
     await delay(200);
+    return sendMessageToContent(tabId, { type: "GET_DATA" });
+  }
+}
 
-    console.log("Sending message to content");
-    const response = await sendMessageToContent(tabId, { type: "GET_DATA" });
-    console.log("Received response", response);
-    return response;
+async function fetchWithTimeout(url, options, timeoutMs = FETCH_TIMEOUT_MS) {
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    return await fetch(url, {
+      ...options,
+      signal: controller.signal,
+    });
+  } finally {
+    window.clearTimeout(timeoutId);
+  }
+}
+
+async function parseResult(response) {
+  try {
+    return normalizeResult(await response.json());
+  } catch {
+    return normalizeResult();
   }
 }
 
@@ -194,18 +299,17 @@ async function loadProblemPreview() {
   try {
     const activeTab = await getActiveTab();
 
-    if (!activeTab?.id || !activeTab.url?.startsWith("https://leetcode.com/problems/")) {
+    if (!isProblemTab(activeTab)) {
       setProblemTitle("");
-      setStatus("Open a LeetCode problem");
+      setStatus(STATUS_MESSAGES.invalidPage);
       return;
     }
 
     const data = await getTabData(activeTab.id);
-    console.log("Received data from content", data);
 
-    if (!data?.title) {
-      setProblemTitle("");
-      setStatus("Open a LeetCode problem");
+    if (!hasText(data?.title) || !hasText(data?.description)) {
+      setProblemTitle(data?.title || "");
+      setStatus(STATUS_MESSAGES.unreadableProblem);
       return;
     }
 
@@ -214,7 +318,7 @@ async function loadProblemPreview() {
   } catch (error) {
     console.error("Preview error:", error);
     setProblemTitle("");
-    setStatus("Open a LeetCode problem");
+    setStatus(STATUS_MESSAGES.invalidPage);
   }
 }
 
@@ -223,7 +327,7 @@ showHint1Btn.addEventListener("click", () => {
   showHint1Btn.disabled = true;
   incrementHintUsage();
 
-  if (hint2El.textContent.trim()) {
+  if (hasText(hint2El.textContent)) {
     showHint2Btn.classList.remove("hidden");
   }
 });
@@ -233,7 +337,7 @@ showHint2Btn.addEventListener("click", () => {
   showHint2Btn.disabled = true;
   incrementHintUsage();
 
-  if (hint3El.textContent.trim()) {
+  if (hasText(hint3El.textContent)) {
     showHint3Btn.classList.remove("hidden");
   }
 });
@@ -245,49 +349,44 @@ showHint3Btn.addEventListener("click", () => {
 });
 
 async function requestHints() {
-  console.log("Button clicked");
-  getHintBtn.disabled = true;
-  regenerateBtn.disabled = true;
-  setStatus("Thinking...");
+  setLoadingState(true);
+  setStatus(STATUS_MESSAGES.loading);
   setOutput({});
   resetHints();
+  regenerateBtn.classList.add("hidden");
   setCoachNote("");
 
   try {
     const activeTab = await getActiveTab();
 
-    if (!activeTab?.id || !activeTab.url?.startsWith("https://leetcode.com/problems/")) {
+    if (!isProblemTab(activeTab)) {
       setProblemTitle("");
-      setStatus("Open a LeetCode problem");
+      setStatus(STATUS_MESSAGES.invalidPage);
       return;
     }
 
     const data = await getTabData(activeTab.id);
-    console.log("Received data from content", data);
 
-    if (!data?.title || !data?.description) {
-      setProblemTitle("");
-      setStatus("Open a LeetCode problem");
+    if (!hasText(data?.title) || !hasText(data?.description)) {
+      setProblemTitle(data?.title || "");
+      setStatus(STATUS_MESSAGES.unreadableProblem);
       return;
     }
 
-    if (!data.code?.trim()) {
+    if (!hasText(data?.code)) {
       setProblemTitle(data.title);
-      setStatus("Write some code first");
+      setStatus(STATUS_MESSAGES.noCode);
       return;
     }
 
     setProblemTitle(data.title);
-    const detectedPatterns = detectPatterns(data.code || "");
-    const coachMessage = buildCoachMessage(data.code || "", detectedPatterns);
+    const coachContext = buildCoachContext(data.code, data.language);
 
-    if (coachMessage) {
-      setCoachNote(coachMessage);
+    if (coachContext.message) {
+      setCoachNote(coachContext.message);
     }
 
-    console.log("Calling API");
-
-    const response = await fetch("http://localhost:3000/get-hints", {
+    const response = await fetchWithTimeout(BACKEND_URL, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -296,32 +395,35 @@ async function requestHints() {
         problem: `${data.title}\n${data.description}`,
         user_code: data.code,
         user_approach: userApproachEl.value.trim(),
-        detected_patterns: detectedPatterns,
+        detected_patterns: coachContext.detectedPatterns,
       }),
     });
 
-    if (!response.ok) {
-      throw new Error("Request failed");
-    }
+    const result = await parseResult(response);
 
-    const result = await response.json();
-    console.log("API response received", result);
+    if (!response.ok) {
+      setOutput(result);
+      setStatus(STATUS_MESSAGES.apiFailure);
+      return;
+    }
 
     setOutput(result);
     enableHints(result);
     setStatus("");
   } catch (error) {
     console.error("Fetch error:", error);
-    setStatus(error.message || "Failed to fetch hints");
+    setOutput({});
+    setStatus(STATUS_MESSAGES.apiFailure);
   } finally {
-    getHintBtn.disabled = false;
-    regenerateBtn.disabled = false;
+    setLoadingState(false);
   }
 }
 
-document.getElementById("getHintBtn").addEventListener("click", requestHints);
+getHintBtn.addEventListener("click", requestHints);
 regenerateBtn.addEventListener("click", requestHints);
 
+setOutput({});
+setLoadingState(false);
 resetHints();
 updateHintUsage();
 loadProblemPreview();

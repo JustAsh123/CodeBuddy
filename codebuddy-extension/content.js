@@ -1,4 +1,6 @@
 const BACKEND_URL = "http://localhost:3000/get-hints";
+const PROBLEM_URL_PREFIX = "https://leetcode.com/problems/";
+const ANALYSIS_TIMEOUT_MS = 15000;
 const PANEL_HOST_ID = "codebuddy-panel-host";
 const STORAGE_KEY = "codebuddy_attempts";
 
@@ -48,6 +50,31 @@ const LANGUAGE_ALIASES = {
   Scala: "Scala",
 };
 
+const SUPPORTED_LANGUAGES = new Set(Object.values(LANGUAGE_ALIASES));
+const BUTTON_LABELS = {
+  idle: "Analyze Code",
+  loading: "Analyzing...",
+};
+const STATUS_MESSAGES = {
+  loading: "Analyzing your code...",
+  invalidPage: "Open a LeetCode problem to use CodeBuddy.",
+  unreadableProblem: "We couldn't read this problem. Refresh the page and try again.",
+  noCode: "Write some code before analyzing.",
+  apiFailure: "Couldn't analyze your code. Please try again.",
+};
+const EMPTY_PANEL_RESULTS = {
+  analysis: "Run CodeBuddy to review your current solution.",
+  mistake: "Potential issues will appear here after analysis.",
+  progress: "Progress feedback will appear once your code is analyzed.",
+};
+const PANEL_NOTICES = {
+  trust: "AI may occasionally be incorrect. Use hints as guidance.",
+  unknownLanguage:
+    "We couldn't confidently detect the editor language, so the feedback may be less precise.",
+  improving: "You're improving by using fewer hints.",
+  fewerHints: "Try solving with fewer hints to keep building confidence.",
+};
+
 const PANEL_CSS = `
   :host {
     all: initial;
@@ -59,19 +86,21 @@ const PANEL_CSS = `
 
   .cb-panel {
     position: fixed;
-    top: 24px;
-    right: 24px;
-    width: 360px;
-    max-height: calc(100vh - 48px);
+    top: 16px;
+    right: 16px;
+    width: min(360px, calc(100vw - 32px));
+    max-height: calc(100vh - 32px);
     overflow-y: auto;
     z-index: 2147483647;
     border: 1px solid #2a2f3a;
     border-radius: 8px;
     padding: 16px;
     background: #0f1117;
+    color-scheme: dark;
     box-shadow: 0 16px 24px rgba(0, 0, 0, 0.24);
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     color: #e6e6e6;
+    line-height: 1.5;
   }
 
   .cb-stack {
@@ -112,26 +141,40 @@ const PANEL_CSS = `
     min-height: 20px;
     margin: 0;
     color: #9aa4b2;
-    font-size: 14px;
+    font-size: 13px;
     line-height: 1.45;
+  }
+
+  .cb-note {
+    margin: 0;
+    color: #9aa4b2;
+    font-size: 12px;
+    line-height: 1.5;
   }
 
   .cb-button {
     width: 100%;
     border: none;
     border-radius: 6px;
-    padding: 12px;
+    min-height: 44px;
+    padding: 12px 14px;
     background: #4f8cff;
     color: #ffffff;
     font-size: 14px;
     font-weight: 700;
     cursor: pointer;
+    touch-action: manipulation;
     transition: background-color 0.2s ease, transform 0.2s ease, opacity 0.2s ease;
   }
 
   .cb-button:hover {
     background: #6a9dff;
     transform: translateY(-1px);
+  }
+
+  .cb-button:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 3px rgba(79, 140, 255, 0.24);
   }
 
   .cb-button:disabled {
@@ -164,6 +207,7 @@ const PANEL_CSS = `
     align-items: center;
     justify-content: space-between;
     gap: 8px;
+    flex-wrap: wrap;
   }
 
   .cb-section-title {
@@ -197,6 +241,11 @@ const PANEL_CSS = `
     line-height: 1.5;
     white-space: pre-wrap;
     color: #e6e6e6;
+    word-break: break-word;
+  }
+
+  .cb-empty {
+    color: #9aa4b2;
   }
 
   .cb-hints {
@@ -233,6 +282,10 @@ const PANEL_CSS = `
     align-items: flex-start;
   }
 
+  .cb-history-row > * {
+    min-width: 0;
+  }
+
   .cb-history-list {
     display: grid;
     gap: 8px;
@@ -258,6 +311,22 @@ function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function hasText(value) {
+  return typeof value === "string" && value.trim().length > 0;
+}
+
+function isProblemPage() {
+  return window.location.href.startsWith(PROBLEM_URL_PREFIX);
+}
+
+function isSupportedLanguage(language) {
+  return SUPPORTED_LANGUAGES.has(language);
+}
+
+function joinMessages(...messages) {
+  return messages.filter((message) => hasText(message)).join(" ");
+}
+
 function waitForDomReady() {
   if (document.readyState === "complete" || document.readyState === "interactive") {
     return Promise.resolve();
@@ -270,6 +339,12 @@ function waitForDomReady() {
 
 function getElementText(element) {
   return element?.innerText?.trim() || "";
+}
+
+function setElementText(element, value, emptyText = "") {
+  const hasValue = hasText(value);
+  element.textContent = hasValue ? value.trim() : emptyText;
+  element.classList.toggle("cb-empty", !hasValue);
 }
 
 function findFirstText(selectors) {
@@ -524,13 +599,35 @@ async function getProblemData() {
 
 function normalizeAnalysis(data = {}) {
   return {
-    analysis: data.analysis || "",
-    mistake: data.mistake || "",
-    progress: data.progress || "",
-    hint1: data.hint1 || "",
-    hint2: data.hint2 || "",
-    hint3: data.hint3 || "",
+    analysis: hasText(data.analysis) ? data.analysis.trim() : "",
+    mistake: hasText(data.mistake) ? data.mistake.trim() : "",
+    progress: hasText(data.progress) ? data.progress.trim() : "",
+    hint1: hasText(data.hint1) ? data.hint1.trim() : "",
+    hint2: hasText(data.hint2) ? data.hint2.trim() : "",
+    hint3: hasText(data.hint3) ? data.hint3.trim() : "",
   };
+}
+
+async function fetchWithTimeout(url, options, timeoutMs = ANALYSIS_TIMEOUT_MS) {
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    return await fetch(url, {
+      ...options,
+      signal: controller.signal,
+    });
+  } finally {
+    window.clearTimeout(timeoutId);
+  }
+}
+
+async function readAnalysisResponse(response) {
+  try {
+    return normalizeAnalysis(await response.json());
+  } catch {
+    return normalizeAnalysis();
+  }
 }
 
 function sanitizeAttempt(attempt) {
@@ -784,6 +881,22 @@ function getAdaptiveFeedback(attempts, userProfile) {
   return "";
 }
 
+function getAdaptiveFeedback(attempts, userProfile) {
+  if (isHintUsageImproving(attempts)) {
+    return PANEL_NOTICES.improving;
+  }
+
+  if (userProfile.avg_hints > 2.5) {
+    return PANEL_NOTICES.fewerHints;
+  }
+
+  return "";
+}
+
+function getLanguageNotice(language) {
+  return isSupportedLanguage(language) ? "" : PANEL_NOTICES.unknownLanguage;
+}
+
 function getPanelElements(shadowRoot) {
   return {
     button: shadowRoot.getElementById("cb-analyze"),
@@ -814,9 +927,15 @@ function setPanelStatus(panel, message) {
   panel.status.textContent = message || "";
 }
 
+function setPanelLoading(panel, isLoading) {
+  panel.button.disabled = isLoading;
+  panel.button.textContent = isLoading ? BUTTON_LABELS.loading : BUTTON_LABELS.idle;
+  panel.button.setAttribute("aria-busy", String(isLoading));
+}
+
 function setMentorFeedback(panel, message) {
   panel.feedback.textContent = message || "";
-  panel.feedback.classList.toggle("cb-hidden", !message);
+  panel.feedback.classList.toggle("cb-hidden", !hasText(message));
 }
 
 function updateHintUsage(panel) {
@@ -885,16 +1004,16 @@ function resetCurrentAttempt(panel) {
 function setPanelResults(panel, data = {}) {
   const normalized = normalizeAnalysis(data);
 
-  panel.analysis.textContent = normalized.analysis;
-  panel.mistake.textContent = normalized.mistake;
-  panel.progress.textContent = normalized.progress;
+  setElementText(panel.analysis, normalized.analysis, EMPTY_PANEL_RESULTS.analysis);
+  setElementText(panel.mistake, normalized.mistake, EMPTY_PANEL_RESULTS.mistake);
+  setElementText(panel.progress, normalized.progress, EMPTY_PANEL_RESULTS.progress);
   panel.hint1.textContent = normalized.hint1;
   panel.hint2.textContent = normalized.hint2;
   panel.hint3.textContent = normalized.hint3;
 
   resetHintFlow(panel);
 
-  if (normalized.hint1) {
+  if (hasText(normalized.hint1)) {
     panel.hint1Button.classList.remove("cb-hidden");
   }
 }
@@ -949,32 +1068,40 @@ function resetStoredProgress(panel) {
 }
 
 async function requestAnalysis(panel) {
-  panel.button.disabled = true;
-  setPanelStatus(panel, "Analyzing...");
+  setPanelLoading(panel, true);
+  setPanelStatus(panel, STATUS_MESSAGES.loading);
   setPanelResults(panel, {});
   setMentorFeedback(panel, "");
   resetCurrentAttempt(panel);
 
   try {
     const data = await getProblemData();
-    const code = data.code.trim();
+    const title = typeof data.title === "string" ? data.title.trim() : "";
+    const description = typeof data.description === "string" ? data.description.trim() : "";
+    const code = typeof data.code === "string" ? data.code.trim() : "";
 
-    if (!data.title || !data.description) {
-      setPanelStatus(panel, "Open a LeetCode problem");
+    if (!isProblemPage() || !title) {
+      setPanelStatus(panel, STATUS_MESSAGES.invalidPage);
+      return;
+    }
+
+    if (!description) {
+      setPanelStatus(panel, STATUS_MESSAGES.unreadableProblem);
       return;
     }
 
     if (!code) {
-      setPanelStatus(panel, "Write some code first");
+      setPanelStatus(panel, STATUS_MESSAGES.noCode);
       return;
     }
 
     const attempts = loadAttempts();
     const userProfile = buildUserProfile(attempts);
     const adaptiveFeedback = getAdaptiveFeedback(attempts, userProfile);
-    const programmingLanguage = data.language || inferLanguageFromCode(code) || "Unknown";
+    const programmingLanguage = normalizeLanguage(data.language) || inferLanguageFromCode(code) || "Unknown";
+    const languageNotice = getLanguageNotice(programmingLanguage);
 
-    const response = await fetch(BACKEND_URL, {
+    const response = await fetchWithTimeout(BACKEND_URL, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -989,20 +1116,26 @@ async function requestAnalysis(panel) {
       }),
     });
 
+    const result = await readAnalysisResponse(response);
+
     if (!response.ok) {
-      throw new Error("Analysis failed, try again");
+      setPanelResults(panel, result);
+      setMentorFeedback(panel, joinMessages(adaptiveFeedback, languageNotice));
+      setPanelStatus(panel, STATUS_MESSAGES.apiFailure);
+      return;
     }
 
-    const result = await response.json();
     setPanelResults(panel, result);
-    saveCurrentAttempt(panel, data.title, data.difficulty || "");
-    setMentorFeedback(panel, adaptiveFeedback);
+    saveCurrentAttempt(panel, title, data.difficulty || "");
+    setMentorFeedback(panel, joinMessages(adaptiveFeedback, languageNotice));
     setPanelStatus(panel, "");
   } catch (error) {
     console.error("CodeBuddy analysis error:", error);
-    setPanelStatus(panel, "Analysis failed, try again");
+    setPanelResults(panel, {});
+    setMentorFeedback(panel, "");
+    setPanelStatus(panel, STATUS_MESSAGES.apiFailure);
   } finally {
-    panel.button.disabled = false;
+    setPanelLoading(panel, false);
   }
 }
 
@@ -1030,7 +1163,8 @@ async function createPanel() {
         <section class="cb-card cb-card-hero">
           <p class="cb-eyebrow">Guided Mentor</p>
           <h2 class="cb-title">CodeBuddy &#129504;</h2>
-          <p id="cb-status" class="cb-status"></p>
+          <p id="cb-status" class="cb-status" role="status" aria-live="polite"></p>
+          <p class="cb-note">${PANEL_NOTICES.trust}</p>
           <button id="cb-analyze" class="cb-button">Analyze Code</button>
         </section>
 
@@ -1132,8 +1266,10 @@ async function createPanel() {
   });
 
   resetCurrentAttempt(panel);
+  setPanelResults(panel, {});
+  setPanelLoading(panel, false);
   renderProgress(panel, loadAttempts());
-  setPanelStatus(panel, "Ready when you are.");
+  setPanelStatus(panel, "");
 
   return panel;
 }
@@ -1151,6 +1287,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         title: document.title || "",
         description: "",
         code: "",
+        difficulty: "",
+        language: "Unknown",
       });
     });
 
