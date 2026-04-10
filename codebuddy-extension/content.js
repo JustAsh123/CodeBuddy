@@ -1,5 +1,6 @@
 const BACKEND_URL = "http://localhost:3000/get-hints";
 const PANEL_HOST_ID = "codebuddy-panel-host";
+const STORAGE_KEY = "codebuddy_attempts";
 
 const TITLE_SELECTORS = [
   '[data-cy="question-title"]',
@@ -35,13 +36,13 @@ const PANEL_CSS = `
     max-height: calc(100vh - 48px);
     overflow-y: auto;
     z-index: 2147483647;
-    border: 1px solid rgba(23, 34, 56, 0.12);
-    border-radius: 16px;
+    border: 1px solid #2a2f3a;
+    border-radius: 8px;
     padding: 16px;
-    background: #f3f6fb;
-    box-shadow: 0 16px 24px rgba(23, 34, 56, 0.12);
-    font-family: Arial, sans-serif;
-    color: #172238;
+    background: #0f1117;
+    box-shadow: 0 16px 24px rgba(0, 0, 0, 0.24);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    color: #e6e6e6;
   }
 
   .cb-stack {
@@ -51,20 +52,20 @@ const PANEL_CSS = `
 
   .cb-card {
     display: grid;
-    gap: 8px;
+    gap: 16px;
     padding: 16px;
-    border-radius: 16px;
-    background: #ffffff;
-    border: 1px solid #dbe3ef;
+    border-radius: 8px;
+    background: #1a1d26;
+    border: 1px solid #2a2f3a;
   }
 
   .cb-card-hero {
-    gap: 16px;
+    gap: 8px;
   }
 
   .cb-eyebrow {
     margin: 0;
-    color: #4f6b9a;
+    color: #9aa4b2;
     font-size: 14px;
     font-weight: 600;
     letter-spacing: 0.04em;
@@ -73,14 +74,15 @@ const PANEL_CSS = `
 
   .cb-title {
     margin: 0;
-    font-size: 24px;
+    font-size: 18px;
     font-weight: 700;
+    color: #e6e6e6;
   }
 
   .cb-status {
     min-height: 20px;
     margin: 0;
-    color: #6b4f00;
+    color: #9aa4b2;
     font-size: 14px;
     line-height: 1.45;
   }
@@ -88,18 +90,18 @@ const PANEL_CSS = `
   .cb-button {
     width: 100%;
     border: none;
-    border-radius: 16px;
-    padding: 16px;
-    background: #2563eb;
+    border-radius: 6px;
+    padding: 12px;
+    background: #4f8cff;
     color: #ffffff;
-    font-size: 15px;
+    font-size: 14px;
     font-weight: 700;
     cursor: pointer;
     transition: background-color 0.2s ease, transform 0.2s ease, opacity 0.2s ease;
   }
 
   .cb-button:hover {
-    background: #1d4ed8;
+    background: #6a9dff;
     transform: translateY(-1px);
   }
 
@@ -109,30 +111,108 @@ const PANEL_CSS = `
     transform: none;
   }
 
+  .cb-button-secondary {
+    background: #1f2430;
+    border: 1px solid #2a2f3a;
+    color: #e6e6e6;
+  }
+
+  .cb-button-secondary:hover {
+    background: #252b38;
+  }
+
   .cb-section {
     display: grid;
     gap: 8px;
     padding: 16px;
-    border-radius: 16px;
-    background: #ffffff;
-    border: 1px solid #dbe3ef;
+    border-radius: 8px;
+    background: #1a1d26;
+    border: 1px solid #2a2f3a;
+  }
+
+  .cb-section-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
   }
 
   .cb-section-title {
     margin: 0;
-    font-size: 16px;
+    font-size: 15px;
     font-weight: 600;
-    color: #172238;
+    color: #e6e6e6;
+  }
+
+  .cb-meta {
+    margin: 0;
+    font-size: 13px;
+    color: #9aa4b2;
+    line-height: 1.45;
   }
 
   .cb-section-text {
     margin: 0;
-    font-size: 15px;
+    font-size: 14px;
     line-height: 1.5;
     white-space: pre-wrap;
-    color: #2b3b52;
+    color: #e6e6e6;
+  }
+
+  .cb-hints {
+    display: grid;
+    gap: 16px;
+  }
+
+  .cb-hint {
+    display: grid;
+    gap: 8px;
+    padding: 16px;
+    border-radius: 6px;
+    background: #11151d;
+    border: 1px solid #2a2f3a;
+  }
+
+  .cb-hint-title {
+    margin: 0;
+    font-size: 14px;
+    font-weight: 600;
+    color: #9aa4b2;
+  }
+
+  .cb-progress-grid {
+    display: grid;
+    gap: 8px;
+  }
+
+  .cb-stat-row,
+  .cb-history-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 16px;
+    align-items: flex-start;
+  }
+
+  .cb-history-list {
+    display: grid;
+    gap: 8px;
+  }
+
+  .cb-reset {
+    margin-top: 8px;
+  }
+
+  .cb-hidden {
+    display: none;
   }
 `;
+
+const uiState = {
+  currentAttemptTimestamp: null,
+  currentProblem: "",
+  currentDifficulty: "",
+  hintsUsed: 0,
+};
 
 function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -229,6 +309,14 @@ function extractCode() {
   return code || "";
 }
 
+function extractDifficulty() {
+  const difficultyMatch = Array.from(document.querySelectorAll("main span, main div, main p"))
+    .map((element) => getElementText(element))
+    .find((text) => text === "Easy" || text === "Medium" || text === "Hard");
+
+  return difficultyMatch || "";
+}
+
 async function waitForProblemContent(maxAttempts = 8, retryDelayMs = 350) {
   console.log("Waiting for DOM...");
   await waitForDomReady();
@@ -237,6 +325,7 @@ async function waitForProblemContent(maxAttempts = 8, retryDelayMs = 350) {
     title: "",
     description: "",
     code: "",
+    difficulty: "",
   };
 
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
@@ -245,11 +334,13 @@ async function waitForProblemContent(maxAttempts = 8, retryDelayMs = 350) {
     const title = extractTitle();
     const description = extractDescription();
     const code = extractCode();
+    const difficulty = extractDifficulty();
 
     lastSnapshot = {
       title: title || "",
       description: description || "",
       code: code || "",
+      difficulty: difficulty || "",
     };
 
     if (lastSnapshot.title && lastSnapshot.description) {
@@ -268,32 +359,165 @@ async function waitForProblemContent(maxAttempts = 8, retryDelayMs = 350) {
     title: lastSnapshot.title || document.title || "",
     description: lastSnapshot.description || "",
     code: lastSnapshot.code || "",
+    difficulty: lastSnapshot.difficulty || "",
   };
 }
 
 async function getProblemData() {
   console.log("Extracting data");
-
   const data = await waitForProblemContent();
-
   console.log("Extraction result", data);
 
   return {
     title: data.title || document.title || "",
     description: data.description || "",
     code: data.code || "",
+    difficulty: data.difficulty || "",
+  };
+}
+
+function normalizeAnalysis(data = {}) {
+  return {
+    analysis: data.analysis || "",
+    mistake: data.mistake || "",
+    progress: data.progress || "",
+    hint1: data.hint1 || "",
+    hint2: data.hint2 || "",
+    hint3: data.hint3 || "",
+  };
+}
+
+function sanitizeAttempt(attempt) {
+  if (!attempt || typeof attempt !== "object") {
+    return null;
+  }
+
+  return {
+    problem: typeof attempt.problem === "string" ? attempt.problem : "",
+    difficulty: typeof attempt.difficulty === "string" ? attempt.difficulty : "",
+    hints_used:
+      typeof attempt.hints_used === "number" && attempt.hints_used >= 0 && attempt.hints_used <= 3
+        ? attempt.hints_used
+        : 0,
+    timestamp: typeof attempt.timestamp === "number" ? attempt.timestamp : 0,
+  };
+}
+
+function saveAttempts(attempts) {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(attempts));
+  } catch {
+    // Fail silently.
+  }
+}
+
+function loadAttempts() {
+  try {
+    const rawAttempts = localStorage.getItem(STORAGE_KEY);
+
+    if (!rawAttempts) {
+      return [];
+    }
+
+    const parsedAttempts = JSON.parse(rawAttempts);
+
+    if (!Array.isArray(parsedAttempts)) {
+      saveAttempts([]);
+      return [];
+    }
+
+    return parsedAttempts
+      .map((attempt) => sanitizeAttempt(attempt))
+      .filter((attempt) => attempt && attempt.problem && attempt.timestamp);
+  } catch {
+    saveAttempts([]);
+    return [];
+  }
+}
+
+function saveAttempt(problem, difficulty, hintsUsed, timestamp) {
+  if (!problem) {
+    return loadAttempts();
+  }
+
+  const attempts = loadAttempts();
+  const duplicateAttempt = attempts.some(
+    (attempt) => attempt.problem === problem && attempt.timestamp === timestamp
+  );
+
+  if (!duplicateAttempt) {
+    attempts.push({
+      problem,
+      difficulty,
+      hints_used: hintsUsed,
+      timestamp,
+    });
+    saveAttempts(attempts);
+  }
+
+  return attempts;
+}
+
+function updateCurrentAttemptHints(hintsUsed) {
+  if (!uiState.currentAttemptTimestamp || !uiState.currentProblem) {
+    return loadAttempts();
+  }
+
+  const attempts = loadAttempts();
+  const attemptIndex = attempts.findIndex(
+    (attempt) =>
+      attempt.problem === uiState.currentProblem &&
+      attempt.timestamp === uiState.currentAttemptTimestamp
+  );
+
+  if (attemptIndex === -1) {
+    return attempts;
+  }
+
+  attempts[attemptIndex] = {
+    ...attempts[attemptIndex],
+    hints_used: hintsUsed,
+  };
+
+  saveAttempts(attempts);
+  return attempts;
+}
+
+function calculateStats(attempts) {
+  const totalProblems = attempts.length;
+  const totalHintsUsed = attempts.reduce((sum, attempt) => sum + attempt.hints_used, 0);
+  const averageHints =
+    totalProblems === 0 ? 0 : Number((totalHintsUsed / totalProblems).toFixed(1));
+
+  return {
+    totalProblems,
+    totalHintsUsed,
+    averageHints,
   };
 }
 
 function getPanelElements(shadowRoot) {
   return {
-    button: shadowRoot.getElementById("cb-get-hint"),
+    button: shadowRoot.getElementById("cb-analyze"),
     status: shadowRoot.getElementById("cb-status"),
     analysis: shadowRoot.getElementById("cb-analysis"),
     mistake: shadowRoot.getElementById("cb-mistake"),
+    progress: shadowRoot.getElementById("cb-progress"),
+    hintUsage: shadowRoot.getElementById("cb-hint-usage"),
+    hint1Button: shadowRoot.getElementById("cb-reveal-hint1"),
+    hint2Button: shadowRoot.getElementById("cb-reveal-hint2"),
+    hint3Button: shadowRoot.getElementById("cb-reveal-hint3"),
+    hint1Block: shadowRoot.getElementById("cb-hint1-block"),
+    hint2Block: shadowRoot.getElementById("cb-hint2-block"),
+    hint3Block: shadowRoot.getElementById("cb-hint3-block"),
     hint1: shadowRoot.getElementById("cb-hint1"),
     hint2: shadowRoot.getElementById("cb-hint2"),
     hint3: shadowRoot.getElementById("cb-hint3"),
+    problemsAttempted: shadowRoot.getElementById("cb-total-problems"),
+    totalHintsUsed: shadowRoot.getElementById("cb-total-hints"),
+    averageHints: shadowRoot.getElementById("cb-average-hints"),
+    historyList: shadowRoot.getElementById("cb-history-list"),
+    resetButton: shadowRoot.getElementById("cb-reset-progress"),
   };
 }
 
@@ -301,29 +525,151 @@ function setPanelStatus(panel, message) {
   panel.status.textContent = message || "";
 }
 
-function setPanelResults(panel, data = {}) {
-  panel.analysis.textContent = data.analysis || "";
-  panel.mistake.textContent = data.mistake || "";
-  panel.hint1.textContent = data.hint1 || "";
-  panel.hint2.textContent = data.hint2 || "";
-  panel.hint3.textContent = data.hint3 || "";
+function updateHintUsage(panel) {
+  panel.hintUsage.textContent = `Hints used: ${uiState.hintsUsed} / 3`;
 }
 
-async function handleGetHintClick(panel) {
+function resetHintUsage(panel) {
+  uiState.hintsUsed = 0;
+  updateHintUsage(panel);
+}
+
+function renderProgress(panel, attempts = loadAttempts()) {
+  const stats = calculateStats(attempts);
+
+  panel.problemsAttempted.textContent = String(stats.totalProblems);
+  panel.totalHintsUsed.textContent = String(stats.totalHintsUsed);
+  panel.averageHints.textContent = String(stats.averageHints);
+
+  panel.historyList.innerHTML = "";
+
+  const recentAttempts = [...attempts].sort((a, b) => b.timestamp - a.timestamp).slice(0, 5);
+
+  if (recentAttempts.length === 0) {
+    const emptyState = document.createElement("p");
+    emptyState.className = "cb-meta";
+    emptyState.textContent = "No attempts yet.";
+    panel.historyList.appendChild(emptyState);
+    return;
+  }
+
+  for (const attempt of recentAttempts) {
+    const row = document.createElement("div");
+    row.className = "cb-history-row";
+
+    const title = document.createElement("span");
+    title.className = "cb-section-text";
+    title.textContent = `[ ${attempt.problem} ]`;
+
+    const hints = document.createElement("span");
+    hints.className = "cb-meta";
+    hints.textContent = `Hints: ${attempt.hints_used}`;
+
+    row.appendChild(title);
+    row.appendChild(hints);
+    panel.historyList.appendChild(row);
+  }
+}
+
+function resetHintFlow(panel) {
+  panel.hint1Button.classList.add("cb-hidden");
+  panel.hint2Button.classList.add("cb-hidden");
+  panel.hint3Button.classList.add("cb-hidden");
+  panel.hint1Block.classList.add("cb-hidden");
+  panel.hint2Block.classList.add("cb-hidden");
+  panel.hint3Block.classList.add("cb-hidden");
+}
+
+function resetCurrentAttempt(panel) {
+  uiState.currentAttemptTimestamp = null;
+  uiState.currentProblem = "";
+  uiState.currentDifficulty = "";
+  resetHintUsage(panel);
+  resetHintFlow(panel);
+}
+
+function setPanelResults(panel, data = {}) {
+  const normalized = normalizeAnalysis(data);
+
+  panel.analysis.textContent = normalized.analysis;
+  panel.mistake.textContent = normalized.mistake;
+  panel.progress.textContent = normalized.progress;
+  panel.hint1.textContent = normalized.hint1;
+  panel.hint2.textContent = normalized.hint2;
+  panel.hint3.textContent = normalized.hint3;
+
+  resetHintFlow(panel);
+
+  if (normalized.hint1) {
+    panel.hint1Button.classList.remove("cb-hidden");
+  }
+}
+
+function revealHint(panel, level) {
+  if (level === 1) {
+    uiState.hintsUsed = 1;
+    panel.hint1Block.classList.remove("cb-hidden");
+    panel.hint1Button.classList.add("cb-hidden");
+
+    if (panel.hint2.textContent.trim()) {
+      panel.hint2Button.classList.remove("cb-hidden");
+    }
+  } else if (level === 2) {
+    uiState.hintsUsed = 2;
+    panel.hint2Block.classList.remove("cb-hidden");
+    panel.hint2Button.classList.add("cb-hidden");
+
+    if (panel.hint3.textContent.trim()) {
+      panel.hint3Button.classList.remove("cb-hidden");
+    }
+  } else {
+    uiState.hintsUsed = 3;
+    panel.hint3Block.classList.remove("cb-hidden");
+    panel.hint3Button.classList.add("cb-hidden");
+  }
+
+  updateHintUsage(panel);
+  const attempts = updateCurrentAttemptHints(uiState.hintsUsed);
+  renderProgress(panel, attempts);
+}
+
+function saveCurrentAttempt(panel, title, difficulty) {
+  const timestamp = Date.now();
+  uiState.currentAttemptTimestamp = timestamp;
+  uiState.currentProblem = title;
+  uiState.currentDifficulty = difficulty;
+
+  const attempts = saveAttempt(title, difficulty, uiState.hintsUsed, timestamp);
+  renderProgress(panel, attempts);
+}
+
+function resetStoredProgress(panel) {
+  try {
+    localStorage.removeItem(STORAGE_KEY);
+  } catch {
+    // Fail silently.
+  }
+
+  renderProgress(panel, []);
+}
+
+async function requestAnalysis(panel) {
   panel.button.disabled = true;
-  setPanelStatus(panel, "Thinking...");
+  setPanelStatus(panel, "Analyzing...");
   setPanelResults(panel, {});
+  resetCurrentAttempt(panel);
 
   try {
     const data = await getProblemData();
+    const code = data.code.trim();
 
     if (!data.title || !data.description) {
-      setPanelStatus(panel, "Unable to find this problem yet.");
+      setPanelStatus(panel, "Open a LeetCode problem");
       return;
     }
 
-    if (!data.code.trim()) {
-      setPanelStatus(panel, "Write some code first.");
+    if (!code) {
+      setPanelStatus(panel, "Write some code first");
       return;
     }
 
@@ -334,21 +680,22 @@ async function handleGetHintClick(panel) {
       },
       body: JSON.stringify({
         problem: `${data.title}\n${data.description}`,
-        user_code: data.code,
+        user_code: code,
         user_approach: "",
       }),
     });
 
     if (!response.ok) {
-      throw new Error("Failed to fetch hints");
+      throw new Error("Analysis failed, try again");
     }
 
     const result = await response.json();
     setPanelResults(panel, result);
+    saveCurrentAttempt(panel, data.title, data.difficulty || "");
     setPanelStatus(panel, "");
   } catch (error) {
-    console.error("CodeBuddy panel error:", error);
-    setPanelStatus(panel, error.message || "Failed to fetch hints");
+    console.error("CodeBuddy analysis error:", error);
+    setPanelStatus(panel, "Analysis failed, try again");
   } finally {
     panel.button.disabled = false;
   }
@@ -379,7 +726,7 @@ async function createPanel() {
           <p class="cb-eyebrow">Guided Mentor</p>
           <h2 class="cb-title">CodeBuddy &#129504;</h2>
           <p id="cb-status" class="cb-status"></p>
-          <button id="cb-get-hint" class="cb-button">Get Hint</button>
+          <button id="cb-analyze" class="cb-button">Analyze Code</button>
         </section>
 
         <section class="cb-section">
@@ -393,28 +740,93 @@ async function createPanel() {
         </section>
 
         <section class="cb-section">
-          <h3 class="cb-section-title">Hint 1</h3>
-          <p id="cb-hint1" class="cb-section-text"></p>
+          <h3 class="cb-section-title">Progress</h3>
+          <p id="cb-progress" class="cb-section-text"></p>
+        </section>
+
+        <section class="cb-section cb-hints">
+          <div class="cb-section-header">
+            <h3 class="cb-section-title">Hints</h3>
+            <p id="cb-hint-usage" class="cb-meta">Hints used: 0 / 3</p>
+          </div>
+
+          <button id="cb-reveal-hint1" class="cb-button cb-button-secondary cb-hidden">
+            Reveal Hint 1
+          </button>
+          <div id="cb-hint1-block" class="cb-hint cb-hidden">
+            <h4 class="cb-hint-title">Hint 1</h4>
+            <p id="cb-hint1" class="cb-section-text"></p>
+          </div>
+
+          <button id="cb-reveal-hint2" class="cb-button cb-button-secondary cb-hidden">
+            Reveal Hint 2
+          </button>
+          <div id="cb-hint2-block" class="cb-hint cb-hidden">
+            <h4 class="cb-hint-title">Hint 2</h4>
+            <p id="cb-hint2" class="cb-section-text"></p>
+          </div>
+
+          <button id="cb-reveal-hint3" class="cb-button cb-button-secondary cb-hidden">
+            Reveal Hint 3
+          </button>
+          <div id="cb-hint3-block" class="cb-hint cb-hidden">
+            <h4 class="cb-hint-title">Hint 3</h4>
+            <p id="cb-hint3" class="cb-section-text"></p>
+          </div>
         </section>
 
         <section class="cb-section">
-          <h3 class="cb-section-title">Hint 2</h3>
-          <p id="cb-hint2" class="cb-section-text"></p>
-        </section>
-
-        <section class="cb-section">
-          <h3 class="cb-section-title">Hint 3</h3>
-          <p id="cb-hint3" class="cb-section-text"></p>
+          <h3 class="cb-section-title">Your Progress</h3>
+          <div class="cb-progress-grid">
+            <div class="cb-stat-row">
+              <span class="cb-meta">Problems Attempted</span>
+              <span id="cb-total-problems" class="cb-section-text">0</span>
+            </div>
+            <div class="cb-stat-row">
+              <span class="cb-meta">Total Hints Used</span>
+              <span id="cb-total-hints" class="cb-section-text">0</span>
+            </div>
+            <div class="cb-stat-row">
+              <span class="cb-meta">Avg Hints per Problem</span>
+              <span id="cb-average-hints" class="cb-section-text">0</span>
+            </div>
+          </div>
+          <div>
+            <h4 class="cb-hint-title">Recent Attempts</h4>
+            <div id="cb-history-list" class="cb-history-list"></div>
+          </div>
+          <button id="cb-reset-progress" class="cb-button cb-button-secondary cb-reset">
+            Reset Progress
+          </button>
         </section>
       </div>
     </div>
   `;
 
   const panel = getPanelElements(shadowRoot);
+
   panel.button.addEventListener("click", () => {
-    handleGetHintClick(panel);
+    requestAnalysis(panel);
   });
 
+  panel.hint1Button.addEventListener("click", () => {
+    revealHint(panel, 1);
+  });
+
+  panel.hint2Button.addEventListener("click", () => {
+    revealHint(panel, 2);
+  });
+
+  panel.hint3Button.addEventListener("click", () => {
+    revealHint(panel, 3);
+  });
+
+  panel.resetButton.addEventListener("click", () => {
+    resetStoredProgress(panel);
+  });
+
+  resetCurrentAttempt(panel);
+  renderProgress(panel, loadAttempts());
   setPanelStatus(panel, "Ready when you are.");
 
   return panel;
