@@ -1,7 +1,8 @@
 const BACKEND_URL = "http://localhost:3000/get-hints";
 const PROBLEM_URL_PREFIX = "https://leetcode.com/problems/";
 const ANALYSIS_TIMEOUT_MS = 15000;
-const PANEL_HOST_ID = "codebuddy-panel-host";
+const PANEL_HOST_ID = "codebuddy-panel";
+const OVERLAY_HOST_ID = "codebuddy-page-overlay";
 const STORAGE_KEY = "codebuddy_attempts";
 
 const TITLE_SELECTORS = [
@@ -52,20 +53,20 @@ const LANGUAGE_ALIASES = {
 
 const SUPPORTED_LANGUAGES = new Set(Object.values(LANGUAGE_ALIASES));
 const BUTTON_LABELS = {
-  idle: "Analyze Code",
-  loading: "Analyzing...",
+  idle: "Review my solution",
+  loading: "Analyzing…",
 };
 const STATUS_MESSAGES = {
-  loading: "Analyzing your code...",
-  invalidPage: "Open a LeetCode problem to use CodeBuddy.",
-  unreadableProblem: "We couldn't read this problem. Refresh the page and try again.",
-  noCode: "Write some code before analyzing.",
-  apiFailure: "Couldn't analyze your code. Please try again.",
+  loading: "",
+  invalidPage: "Open a LeetCode problem page and I can help you there.",
+  unreadableProblem: "I couldn’t read the problem text. Try a quick refresh and we’ll try again.",
+  noCode: "Write a bit of code in the editor first — then I can take a look.",
+  apiFailure: "Something went wrong on my side. Give it another try in a moment.",
 };
 const EMPTY_PANEL_RESULTS = {
-  analysis: "Run CodeBuddy to review your current solution.",
-  mistake: "Potential issues will appear here after analysis.",
-  progress: "Progress feedback will appear once your code is analyzed.",
+  analysis: "Tap “Review my solution” and I’ll walk through your code with you.",
+  mistake: "When you’re ready, I’ll share what might be going sideways — gently.",
+  progress: "We’ll celebrate what’s working and note what to tighten next.",
 };
 const PANEL_NOTICES = {
   trust: "AI may occasionally be incorrect. Use hints as guidance.",
@@ -77,208 +78,553 @@ const PANEL_NOTICES = {
 
 const PANEL_CSS = `
   :host {
-    all: initial;
+    display: block;
+    margin: 0;
+    padding: 0;
+    border: none;
+    overflow: visible;
+    pointer-events: none;
+    background: transparent;
   }
 
   * {
     box-sizing: border-box;
   }
 
-  .cb-panel {
+  .cb-root {
     position: fixed;
-    top: 16px;
-    right: 16px;
-    width: min(360px, calc(100vw - 32px));
-    max-height: calc(100vh - 32px);
-    overflow-y: auto;
-    z-index: 2147483647;
-    border: 1px solid #2a2f3a;
-    border-radius: 8px;
-    padding: 16px;
-    background: #0f1117;
-    color-scheme: dark;
-    box-shadow: 0 16px 24px rgba(0, 0, 0, 0.24);
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    inset: 0;
+    pointer-events: none;
+    z-index: 0;
+    font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     color: #e6e6e6;
     line-height: 1.5;
+    color-scheme: dark;
   }
 
-  .cb-stack {
-    display: grid;
-    gap: 16px;
+  .cb-root > * {
+    pointer-events: auto;
   }
 
-  .cb-card {
+  .cb-fab {
+    position: fixed;
+    right: 20px;
+    bottom: 20px;
+    width: 52px;
+    height: 52px;
+    border: none;
+    border-radius: 999px;
+    background: linear-gradient(145deg, #6c8cff 0%, #5576e6 100%);
+    color: #fff;
+    cursor: pointer;
     display: grid;
-    gap: 16px;
-    padding: 16px;
-    border-radius: 8px;
+    place-items: center;
+    box-shadow: 0 10px 28px rgba(0, 0, 0, 0.35), 0 0 0 1px rgba(255, 255, 255, 0.06) inset;
+    transition: transform 0.25s ease, box-shadow 0.25s ease, filter 0.25s ease;
+  }
+
+  .cb-fab:hover {
+    transform: scale(1.06);
+    box-shadow: 0 14px 36px rgba(108, 140, 255, 0.35), 0 0 0 1px rgba(255, 255, 255, 0.1) inset;
+    filter: brightness(1.05);
+  }
+
+  .cb-fab:active {
+    transform: scale(0.98);
+  }
+
+  .cb-fab:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+    transform: none;
+    filter: none;
+  }
+
+  .cb-fab:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 3px rgba(108, 140, 255, 0.45), 0 10px 28px rgba(0, 0, 0, 0.35);
+  }
+
+  .cb-fab svg {
+    width: 24px;
+    height: 24px;
+  }
+
+  .cb-fab-tooltip {
+    position: absolute;
+    right: 64px;
+    bottom: 50%;
+    transform: translateY(50%) translateX(6px);
+    padding: 8px 12px;
+    border-radius: 10px;
     background: #1a1d26;
-    border: 1px solid #2a2f3a;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    color: #e6e6e6;
+    font-size: 13px;
+    font-weight: 500;
+    white-space: nowrap;
+    opacity: 0;
+    visibility: hidden;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+    transition: opacity 0.22s ease, transform 0.22s ease, visibility 0.22s ease;
+    pointer-events: none;
   }
 
-  .cb-card-hero {
-    gap: 8px;
+  .cb-fab-wrap {
+    position: fixed;
+    right: 20px;
+    bottom: 20px;
+    z-index: 2;
+    pointer-events: none;
   }
 
-  .cb-eyebrow {
+  .cb-fab-wrap .cb-fab {
+    position: static;
+    pointer-events: auto;
+  }
+
+  .cb-fab-wrap:hover .cb-fab-tooltip,
+  .cb-fab-wrap:focus-within .cb-fab-tooltip {
+    opacity: 1;
+    visibility: visible;
+    transform: translateY(50%) translateX(0);
+  }
+
+  .cb-drawer {
+    position: fixed;
+    top: 0;
+    right: 0;
+    width: min(360px, 100vw);
+    height: 100vh;
+    max-height: 100dvh;
+    background: linear-gradient(165deg, #1e222d 0%, #16181f 50%, #12141a 100%);
+    border-left: 1px solid rgba(108, 140, 255, 0.12);
+    border-radius: 20px 0 0 20px;
+    box-shadow:
+      -24px 0 64px rgba(0, 0, 0, 0.55),
+      -1px 0 0 rgba(255, 255, 255, 0.04) inset;
+    display: flex;
+    flex-direction: column;
+    transform: translateX(100%);
+    transition: transform 0.32s cubic-bezier(0.22, 1, 0.36, 1);
+    z-index: 1;
+    overflow: hidden;
+  }
+
+  .cb-root.cb-open .cb-drawer {
+    transform: translateX(0);
+  }
+
+  @media (max-width: 400px) {
+    .cb-drawer {
+      border-radius: 0;
+      width: 100vw;
+    }
+  }
+
+  .cb-header {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 16px 18px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    background: linear-gradient(180deg, #20242f 0%, #1a1d26 100%);
+  }
+
+  .cb-brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+  }
+
+  .cb-brand-mark {
+    width: 36px;
+    height: 36px;
+    border-radius: 10px;
+    background: rgba(108, 140, 255, 0.15);
+    border: 1px solid rgba(108, 140, 255, 0.25);
+    display: grid;
+    place-items: center;
+    flex-shrink: 0;
+  }
+
+  .cb-brand-mark svg {
+    width: 20px;
+    height: 20px;
+    color: #6c8cff;
+  }
+
+  .cb-brand-text {
+    min-width: 0;
+  }
+
+  .cb-brand-name {
     margin: 0;
-    color: #9aa4b2;
+    font-size: 16px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    color: #e6e6e6;
+  }
+
+  .cb-brand-tag {
+    margin: 2px 0 0;
+    font-size: 12px;
+    color: #9aa0a6;
+    font-weight: 500;
+  }
+
+  .cb-icon-btn {
+    width: 36px;
+    height: 36px;
+    border-radius: 10px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: rgba(255, 255, 255, 0.04);
+    color: #9aa0a6;
+    cursor: pointer;
+    display: grid;
+    place-items: center;
+    transition: background 0.2s ease, color 0.2s ease, border-color 0.2s ease;
+    flex-shrink: 0;
+  }
+
+  .cb-icon-btn:hover {
+    background: rgba(255, 255, 255, 0.08);
+    color: #e6e6e6;
+    border-color: rgba(255, 255, 255, 0.12);
+  }
+
+  .cb-icon-btn:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 2px rgba(108, 140, 255, 0.45);
+  }
+
+  .cb-icon-btn:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+
+  .cb-chat {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 16px 18px;
+    background: radial-gradient(120% 80% at 100% 0%, rgba(108, 140, 255, 0.06) 0%, transparent 55%), #0f1117;
+    scroll-behavior: smooth;
+  }
+
+  .cb-chat-messages {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .cb-msg {
+    max-width: 100%;
+    animation: cb-msg-in 0.28s ease forwards;
+    opacity: 0;
+    transform: translateY(8px);
+  }
+
+  @keyframes cb-msg-in {
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  .cb-msg-row {
+    display: flex;
+    gap: 10px;
+    align-items: flex-end;
+  }
+
+  .cb-msg-row.cb-user {
+    flex-direction: row-reverse;
+  }
+
+  .cb-avatar {
+    width: 28px;
+    height: 28px;
+    border-radius: 8px;
+    flex-shrink: 0;
+    display: grid;
+    place-items: center;
     font-size: 14px;
-    font-weight: 600;
+  }
+
+  .cb-avatar-ai {
+    background: rgba(108, 140, 255, 0.18);
+    border: 1px solid rgba(108, 140, 255, 0.28);
+  }
+
+  .cb-avatar-user {
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+  }
+
+  .cb-bubble {
+    padding: 12px 14px;
+    border-radius: 12px;
+    font-size: 14px;
+    line-height: 1.55;
+    word-break: break-word;
+    white-space: pre-wrap;
+    max-width: calc(100% - 38px);
+  }
+
+  .cb-bubble-ai {
+    background: #252830;
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    color: #e6e6e6;
+    border-bottom-left-radius: 4px;
+  }
+
+  .cb-bubble-user {
+    background: #6c8cff;
+    color: #fff;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-bottom-right-radius: 4px;
+    font-weight: 500;
+  }
+
+  .cb-bubble-label {
+    display: block;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: #6c8cff;
+    margin-bottom: 6px;
+  }
+
+  .cb-bubble-user .cb-bubble-label {
+    color: rgba(255, 255, 255, 0.85);
+  }
+
+  .cb-bubble.cb-muted {
+    color: #9aa0a6;
+    font-size: 13px;
+  }
+
+  .cb-typing {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 4px 0;
+  }
+
+  .cb-typing-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: #6c8cff;
+    animation: cb-typing 1.1s ease-in-out infinite;
+  }
+
+  .cb-typing-dot:nth-child(2) {
+    animation-delay: 0.15s;
+  }
+
+  .cb-typing-dot:nth-child(3) {
+    animation-delay: 0.3s;
+  }
+
+  @keyframes cb-typing {
+    0%, 60%, 100% {
+      transform: translateY(0);
+      opacity: 0.35;
+    }
+    30% {
+      transform: translateY(-5px);
+      opacity: 1;
+    }
+  }
+
+  .cb-hint-reveal {
+    margin-top: 4px;
+    padding: 12px 14px;
+    border-radius: 10px;
+    background: #14171f;
+    border: 1px solid rgba(108, 140, 255, 0.2);
+    animation: cb-hint-in 0.32s ease forwards;
+    opacity: 0;
+    transform: translateY(10px);
+  }
+
+  @keyframes cb-hint-in {
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  .cb-hint-reveal .cb-hint-title {
+    margin: 0 0 6px;
+    font-size: 12px;
+    font-weight: 700;
+    color: #6c8cff;
     letter-spacing: 0.04em;
     text-transform: uppercase;
   }
 
-  .cb-title {
+  .cb-hint-reveal .cb-section-text {
     margin: 0;
-    font-size: 18px;
-    font-weight: 700;
+    font-size: 14px;
     color: #e6e6e6;
+    line-height: 1.55;
+    white-space: pre-wrap;
+    word-break: break-word;
   }
 
-  .cb-status {
-    min-height: 20px;
-    margin: 0;
-    color: #9aa4b2;
-    font-size: 13px;
-    line-height: 1.45;
+  .cb-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 4px;
+    max-width: calc(100% - 38px);
+    margin-left: 38px;
   }
 
-  .cb-note {
-    margin: 0;
-    color: #9aa4b2;
-    font-size: 12px;
-    line-height: 1.5;
+  .cb-actions.cb-user-offset {
+    margin-left: 0;
+    margin-right: 38px;
+    align-self: flex-end;
+    align-items: stretch;
   }
 
   .cb-button {
     width: 100%;
     border: none;
-    border-radius: 6px;
+    border-radius: 10px;
     min-height: 44px;
-    padding: 12px 14px;
-    background: #4f8cff;
-    color: #ffffff;
+    padding: 12px 16px;
+    background: #6c8cff;
+    color: #fff;
     font-size: 14px;
-    font-weight: 700;
+    font-weight: 600;
     cursor: pointer;
     touch-action: manipulation;
-    transition: background-color 0.2s ease, transform 0.2s ease, opacity 0.2s ease;
+    transition: background 0.22s ease, transform 0.22s ease, opacity 0.22s ease, box-shadow 0.22s ease;
   }
 
-  .cb-button:hover {
-    background: #6a9dff;
+  .cb-button:hover:not(:disabled) {
+    background: #7d9aff;
     transform: translateY(-1px);
+    box-shadow: 0 6px 20px rgba(108, 140, 255, 0.35);
   }
 
   .cb-button:focus-visible {
     outline: none;
-    box-shadow: 0 0 0 3px rgba(79, 140, 255, 0.24);
+    box-shadow: 0 0 0 3px rgba(108, 140, 255, 0.35);
   }
 
   .cb-button:disabled {
-    opacity: 0.7;
+    opacity: 0.55;
     cursor: not-allowed;
     transform: none;
+    box-shadow: none;
   }
 
   .cb-button-secondary {
-    background: #1f2430;
-    border: 1px solid #2a2f3a;
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.1);
     color: #e6e6e6;
   }
 
-  .cb-button-secondary:hover {
-    background: #252b38;
+  .cb-button-secondary:hover:not(:disabled) {
+    background: rgba(255, 255, 255, 0.1);
+    box-shadow: none;
   }
 
-  .cb-section {
-    display: grid;
-    gap: 8px;
-    padding: 16px;
-    border-radius: 8px;
+  .cb-composer {
+    flex-shrink: 0;
+    padding: 14px 18px 16px;
+    border-top: 1px solid rgba(255, 255, 255, 0.06);
     background: #1a1d26;
-    border: 1px solid #2a2f3a;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
   }
 
-  .cb-section-header {
+  .cb-status {
+    min-height: 18px;
+    margin: 0;
+    font-size: 12px;
+    color: #9aa0a6;
+    line-height: 1.45;
+  }
+
+  .cb-note {
+    margin: 0;
+    font-size: 11px;
+    color: #9aa0a6;
+    line-height: 1.45;
+    text-align: center;
+  }
+
+  .cb-footer {
+    flex-shrink: 0;
+    padding: 0 18px 14px;
+    background: #1a1d26;
+  }
+
+  .cb-details {
+    border-radius: 10px;
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    background: rgba(15, 17, 23, 0.6);
+    overflow: hidden;
+  }
+
+  .cb-details summary {
+    padding: 10px 12px;
+    font-size: 12px;
+    font-weight: 600;
+    color: #9aa0a6;
+    cursor: pointer;
+    list-style: none;
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 8px;
-    flex-wrap: wrap;
+    user-select: none;
+    transition: color 0.2s ease, background 0.2s ease;
   }
 
-  .cb-section-title {
-    margin: 0;
-    font-size: 15px;
-    font-weight: 600;
+  .cb-details summary::-webkit-details-marker {
+    display: none;
+  }
+
+  .cb-details summary:hover {
     color: #e6e6e6;
+    background: rgba(255, 255, 255, 0.03);
+  }
+
+  .cb-details-body {
+    padding: 0 12px 12px;
+    display: grid;
+    gap: 10px;
   }
 
   .cb-meta {
     margin: 0;
-    font-size: 13px;
-    color: #9aa4b2;
+    font-size: 12px;
+    color: #9aa0a6;
     line-height: 1.45;
-  }
-
-  .cb-feedback {
-    margin: 0;
-    padding: 12px;
-    border-radius: 6px;
-    background: rgba(79, 140, 255, 0.1);
-    border: 1px solid rgba(79, 140, 255, 0.2);
-    color: #cfe0ff;
-    font-size: 13px;
-    line-height: 1.45;
-  }
-
-  .cb-section-text {
-    margin: 0;
-    font-size: 14px;
-    line-height: 1.5;
-    white-space: pre-wrap;
-    color: #e6e6e6;
-    word-break: break-word;
-  }
-
-  .cb-empty {
-    color: #9aa4b2;
-  }
-
-  .cb-hints {
-    display: grid;
-    gap: 16px;
-  }
-
-  .cb-hint {
-    display: grid;
-    gap: 8px;
-    padding: 16px;
-    border-radius: 6px;
-    background: #11151d;
-    border: 1px solid #2a2f3a;
-  }
-
-  .cb-hint-title {
-    margin: 0;
-    font-size: 14px;
-    font-weight: 600;
-    color: #9aa4b2;
   }
 
   .cb-progress-grid {
     display: grid;
-    gap: 8px;
+    gap: 6px;
   }
 
   .cb-stat-row,
   .cb-history-row {
     display: flex;
     justify-content: space-between;
-    gap: 16px;
+    gap: 12px;
     align-items: flex-start;
   }
 
@@ -286,17 +632,60 @@ const PANEL_CSS = `
     min-width: 0;
   }
 
-  .cb-history-list {
-    display: grid;
-    gap: 8px;
+  .cb-section-text {
+    margin: 0;
+    font-size: 12px;
+    line-height: 1.45;
+    color: #e6e6e6;
+    word-break: break-word;
   }
 
-  .cb-reset {
-    margin-top: 8px;
+  .cb-history-list {
+    display: grid;
+    gap: 6px;
+    max-height: 120px;
+    overflow-y: auto;
+  }
+
+  .cb-feedback {
+    margin: 0;
+    padding: 10px 12px;
+    border-radius: 10px;
+    background: rgba(108, 140, 255, 0.12);
+    border: 1px solid rgba(108, 140, 255, 0.22);
+    color: #c8d4ff;
+    font-size: 12px;
+    line-height: 1.45;
+  }
+
+  .cb-empty {
+    color: #9aa0a6;
   }
 
   .cb-hidden {
-    display: none;
+    display: none !important;
+  }
+
+  .cb-sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
+
+  .cb-root.cb-ui-locked .cb-drawer button,
+  .cb-root.cb-ui-locked .cb-drawer summary,
+  .cb-root.cb-ui-locked .cb-fab {
+    pointer-events: none;
+  }
+
+  .cb-root.cb-ui-locked .cb-analyze {
+    pointer-events: none;
   }
 `;
 
@@ -339,12 +728,6 @@ function waitForDomReady() {
 
 function getElementText(element) {
   return element?.innerText?.trim() || "";
-}
-
-function setElementText(element, value, emptyText = "") {
-  const hasValue = hasText(value);
-  element.textContent = hasValue ? value.trim() : emptyText;
-  element.classList.toggle("cb-empty", !hasValue);
 }
 
 function findFirstText(selectors) {
@@ -871,18 +1254,6 @@ function isHintUsageImproving(attempts) {
 
 function getAdaptiveFeedback(attempts, userProfile) {
   if (isHintUsageImproving(attempts)) {
-    return "You're improving — using fewer hints 👏";
-  }
-
-  if (userProfile.avg_hints > 2.5) {
-    return "Try solving with fewer hints to improve";
-  }
-
-  return "";
-}
-
-function getAdaptiveFeedback(attempts, userProfile) {
-  if (isHintUsageImproving(attempts)) {
     return PANEL_NOTICES.improving;
   }
 
@@ -897,21 +1268,31 @@ function getLanguageNotice(language) {
   return isSupportedLanguage(language) ? "" : PANEL_NOTICES.unknownLanguage;
 }
 
+const CB_ICON_BRAIN = `
+  <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+    <path d="M12 5a3 3 0 0 0-3 3v1.1a3 3 0 0 0-2 2.8c0 1.2.7 2.2 1.7 2.7-.1.3-.2.7-.2 1.1a3 3 0 0 0 3 3c.5 0 1-.1 1.4-.4.4.3.9.4 1.4.4a3 3 0 0 0 3-3c0-.4-.1-.8-.2-1.1 1-.5 1.7-1.5 1.7-2.7a3 3 0 0 0-2-2.8V8a3 3 0 0 0-3-3Z"/>
+    <path d="M9 8V7a3 3 0 0 1 6 0v1"/>
+    <path d="M10 18v2M14 18v2"/>
+  </svg>
+`;
+
 function getPanelElements(shadowRoot) {
   return {
+    root: shadowRoot.querySelector(".cb-root"),
+    overlay: null,
+    drawer: shadowRoot.getElementById("cb-drawer"),
+    fab: shadowRoot.getElementById("cb-fab"),
+    closeBtn: shadowRoot.getElementById("cb-close"),
+    chatMessages: shadowRoot.getElementById("cb-chat-messages"),
+    chatScroll: shadowRoot.getElementById("cb-chat-scroll"),
     button: shadowRoot.getElementById("cb-analyze"),
     status: shadowRoot.getElementById("cb-status"),
-    analysis: shadowRoot.getElementById("cb-analysis"),
-    mistake: shadowRoot.getElementById("cb-mistake"),
-    progress: shadowRoot.getElementById("cb-progress"),
     feedback: shadowRoot.getElementById("cb-feedback"),
     hintUsage: shadowRoot.getElementById("cb-hint-usage"),
+    hintButtonPool: shadowRoot.getElementById("cb-hint-button-pool"),
     hint1Button: shadowRoot.getElementById("cb-reveal-hint1"),
     hint2Button: shadowRoot.getElementById("cb-reveal-hint2"),
     hint3Button: shadowRoot.getElementById("cb-reveal-hint3"),
-    hint1Block: shadowRoot.getElementById("cb-hint1-block"),
-    hint2Block: shadowRoot.getElementById("cb-hint2-block"),
-    hint3Block: shadowRoot.getElementById("cb-hint3-block"),
     hint1: shadowRoot.getElementById("cb-hint1"),
     hint2: shadowRoot.getElementById("cb-hint2"),
     hint3: shadowRoot.getElementById("cb-hint3"),
@@ -920,7 +1301,217 @@ function getPanelElements(shadowRoot) {
     averageHints: shadowRoot.getElementById("cb-average-hints"),
     historyList: shadowRoot.getElementById("cb-history-list"),
     resetButton: shadowRoot.getElementById("cb-reset-progress"),
+    _loadingNode: null,
+    _hintHost: null,
   };
+}
+
+function scrollChatToBottom(panel) {
+  requestAnimationFrame(() => {
+    panel.chatScroll.scrollTop = panel.chatScroll.scrollHeight;
+  });
+}
+
+function removeTurnMessages(panel) {
+  rehomeHintButtons(panel);
+  panel._hintHost = null;
+  panel.chatMessages.querySelectorAll("[data-cb-turn]").forEach((node) => node.remove());
+  removeLoadingBubble(panel);
+}
+
+function appendUserMessage(panel, text) {
+  const wrap = document.createElement("div");
+  wrap.className = "cb-msg cb-msg-row cb-user";
+  wrap.dataset.cbTurn = "";
+
+  const av = document.createElement("div");
+  av.className = "cb-avatar cb-avatar-user";
+  av.setAttribute("aria-hidden", "true");
+  av.textContent = "You";
+
+  const bubble = document.createElement("div");
+  bubble.className = "cb-bubble cb-bubble-user";
+  bubble.textContent = text;
+
+  wrap.appendChild(av);
+  wrap.appendChild(bubble);
+  panel.chatMessages.appendChild(wrap);
+  scrollChatToBottom(panel);
+}
+
+function appendAiMessage(panel, text, options = {}) {
+  const { label = "", isWelcome = false, muted = false } = options;
+  const wrap = document.createElement("div");
+  wrap.className = "cb-msg cb-msg-row";
+  if (!isWelcome) {
+    wrap.dataset.cbTurn = "";
+  } else {
+    wrap.dataset.cbWelcome = "";
+  }
+
+  const av = document.createElement("div");
+  av.className = "cb-avatar cb-avatar-ai";
+  av.setAttribute("aria-hidden", "true");
+  av.innerHTML = CB_ICON_BRAIN;
+
+  const bubble = document.createElement("div");
+  bubble.className = `cb-bubble cb-bubble-ai${muted ? " cb-muted" : ""}`;
+
+  if (hasText(label)) {
+    const lab = document.createElement("span");
+    lab.className = "cb-bubble-label";
+    lab.textContent = label;
+    bubble.appendChild(lab);
+  }
+
+  const body = document.createElement("span");
+  body.textContent = text;
+  bubble.appendChild(body);
+
+  wrap.appendChild(av);
+  wrap.appendChild(bubble);
+  panel.chatMessages.appendChild(wrap);
+  scrollChatToBottom(panel);
+}
+
+function showLoadingBubble(panel) {
+  removeLoadingBubble(panel);
+  const wrap = document.createElement("div");
+  wrap.className = "cb-msg cb-msg-row";
+  wrap.dataset.cbTurn = "";
+  wrap.dataset.cbLoading = "";
+
+  const av = document.createElement("div");
+  av.className = "cb-avatar cb-avatar-ai";
+  av.setAttribute("aria-hidden", "true");
+  av.innerHTML = CB_ICON_BRAIN;
+
+  const bubble = document.createElement("div");
+  bubble.className = "cb-bubble cb-bubble-ai cb-muted";
+  const label = document.createElement("span");
+  label.className = "cb-bubble-label";
+  label.textContent = "Analyzing";
+  const typing = document.createElement("span");
+  typing.className = "cb-typing";
+  typing.setAttribute("aria-hidden", "true");
+  typing.innerHTML = '<span class="cb-typing-dot"></span><span class="cb-typing-dot"></span><span class="cb-typing-dot"></span>';
+  const line = document.createElement("div");
+  line.appendChild(document.createTextNode("Taking a thoughtful look at your solution "));
+  line.appendChild(typing);
+  bubble.appendChild(label);
+  bubble.appendChild(line);
+
+  wrap.appendChild(av);
+  wrap.appendChild(bubble);
+  panel.chatMessages.appendChild(wrap);
+  panel._loadingNode = wrap;
+  scrollChatToBottom(panel);
+}
+
+function removeLoadingBubble(panel) {
+  if (panel._loadingNode?.parentNode) {
+    panel._loadingNode.remove();
+  }
+  panel._loadingNode = null;
+  const orphan = panel.chatMessages.querySelector("[data-cb-loading]");
+  if (orphan) {
+    orphan.remove();
+  }
+}
+
+function applyPageOverlayBaseStyles(el) {
+  Object.assign(el.style, {
+    position: "fixed",
+    top: "0",
+    left: "0",
+    right: "0",
+    bottom: "0",
+    width: "100vw",
+    height: "100vh",
+    margin: "0",
+    padding: "0",
+    border: "none",
+    boxSizing: "border-box",
+    background: "rgba(4, 6, 12, 0.82)",
+    backdropFilter: "blur(10px)",
+    WebkitBackdropFilter: "blur(10px)",
+    opacity: "0",
+    pointerEvents: "none",
+    transition: "opacity 0.3s ease",
+    zIndex: "999998",
+  });
+}
+
+function ensurePageOverlay(panel) {
+  if (!panel) {
+    return;
+  }
+  let el = document.getElementById(OVERLAY_HOST_ID);
+  if (!el) {
+    el = document.createElement("div");
+    el.id = OVERLAY_HOST_ID;
+    el.setAttribute("aria-hidden", "true");
+    applyPageOverlayBaseStyles(el);
+    document.body.appendChild(el);
+  } else if (el.parentNode !== document.body) {
+    document.body.appendChild(el);
+  }
+  el.onclick = () => setPanelOpen(panel, false);
+  panel.overlay = el;
+}
+
+function setPanelOpen(panel, open) {
+  if (!panel?.root) {
+    return;
+  }
+  panel.root.classList.toggle("cb-open", open);
+  if (panel.overlay) {
+    panel.overlay.style.opacity = open ? "1" : "0";
+    panel.overlay.style.pointerEvents = open ? "auto" : "none";
+    panel.overlay.setAttribute("aria-hidden", String(!open));
+  }
+  if (panel.fab) {
+    panel.fab.setAttribute("aria-expanded", String(open));
+  }
+}
+
+function toggleDrawer(panel) {
+  if (!panel?.root) {
+    return;
+  }
+  setPanelOpen(panel, !panel.root.classList.contains("cb-open"));
+}
+
+function applyPanelHostSafetyStyles(host) {
+  if (!host) {
+    return;
+  }
+  host.style.position = "fixed";
+  host.style.right = "20px";
+  host.style.bottom = "20px";
+  host.style.zIndex = "999999";
+  host.style.display = "block";
+  host.style.visibility = "visible";
+  host.style.opacity = "1";
+  host.style.margin = "0";
+  host.style.padding = "0";
+  host.style.border = "none";
+  host.style.outline = "none";
+  host.style.background = "transparent";
+  host.style.pointerEvents = "none";
+  host.style.overflow = "visible";
+  host.style.isolation = "isolate";
+}
+
+function ensureWelcomeMessage(panel) {
+  if (panel.chatMessages.querySelector("[data-cb-welcome]")) {
+    return;
+  }
+  appendAiMessage(
+    panel,
+    "Hi — I'm CodeBuddy. When you're ready, tap “Review my solution” and I'll go through your code in order: what I see, what to watch for, then hints only if you want them.",
+    { isWelcome: true }
+  );
 }
 
 function setPanelStatus(panel, message) {
@@ -931,6 +1522,9 @@ function setPanelLoading(panel, isLoading) {
   panel.button.disabled = isLoading;
   panel.button.textContent = isLoading ? BUTTON_LABELS.loading : BUTTON_LABELS.idle;
   panel.button.setAttribute("aria-busy", String(isLoading));
+  panel.fab.disabled = isLoading;
+  panel.closeBtn.disabled = isLoading;
+  panel.root?.classList.toggle("cb-ui-locked", isLoading);
 }
 
 function setMentorFeedback(panel, message) {
@@ -939,7 +1533,7 @@ function setMentorFeedback(panel, message) {
 }
 
 function updateHintUsage(panel) {
-  panel.hintUsage.textContent = `Hints used: ${uiState.hintsUsed} / 3`;
+  panel.hintUsage.textContent = `Hints revealed: ${uiState.hintsUsed} / 3`;
 }
 
 function resetHintUsage(panel) {
@@ -972,11 +1566,11 @@ function renderProgress(panel, attempts = loadAttempts()) {
 
     const title = document.createElement("span");
     title.className = "cb-section-text";
-    title.textContent = `[ ${attempt.problem} ]`;
+    title.textContent = attempt.problem;
 
     const hints = document.createElement("span");
     hints.className = "cb-meta";
-    hints.textContent = `Hints: ${attempt.hints_used} | Attempts: ${attempt.attempts}`;
+    hints.textContent = `Hints ${attempt.hints_used} · ${attempt.attempts} run(s)`;
 
     row.appendChild(title);
     row.appendChild(hints);
@@ -984,13 +1578,68 @@ function renderProgress(panel, attempts = loadAttempts()) {
   }
 }
 
-function resetHintFlow(panel) {
+function resetHintButtons(panel) {
   panel.hint1Button.classList.add("cb-hidden");
   panel.hint2Button.classList.add("cb-hidden");
   panel.hint3Button.classList.add("cb-hidden");
-  panel.hint1Block.classList.add("cb-hidden");
-  panel.hint2Block.classList.add("cb-hidden");
-  panel.hint3Block.classList.add("cb-hidden");
+}
+
+function rehomeHintButtons(panel) {
+  panel.hintButtonPool.appendChild(panel.hint1Button);
+  panel.hintButtonPool.appendChild(panel.hint2Button);
+  panel.hintButtonPool.appendChild(panel.hint3Button);
+}
+
+function mountHintHost(panel) {
+  rehomeHintButtons(panel);
+  if (panel._hintHost) {
+    panel._hintHost.remove();
+    panel._hintHost = null;
+  }
+  const wrap = document.createElement("div");
+  wrap.className = "cb-msg";
+  wrap.dataset.cbTurn = "";
+
+  const intro = document.createElement("div");
+  intro.className = "cb-msg-row";
+  const av = document.createElement("div");
+  av.className = "cb-avatar cb-avatar-ai";
+  av.setAttribute("aria-hidden", "true");
+  av.innerHTML = CB_ICON_BRAIN;
+  const bubble = document.createElement("div");
+  bubble.className = "cb-bubble cb-bubble-ai";
+  const lab = document.createElement("span");
+  lab.className = "cb-bubble-label";
+  lab.textContent = "Hints";
+  const body = document.createElement("span");
+  body.textContent =
+    "No pressure — I'll reveal one hint at a time. Tap when you want the next nudge.";
+  bubble.appendChild(lab);
+  bubble.appendChild(body);
+  intro.appendChild(av);
+  intro.appendChild(bubble);
+
+  const actions = document.createElement("div");
+  actions.className = "cb-actions";
+  actions.appendChild(panel.hint1Button);
+  actions.appendChild(panel.hint2Button);
+  actions.appendChild(panel.hint3Button);
+
+  wrap.appendChild(intro);
+  wrap.appendChild(actions);
+  panel.chatMessages.appendChild(wrap);
+  panel._hintHost = wrap;
+  panel.hint1Button.classList.remove("cb-hidden");
+  scrollChatToBottom(panel);
+}
+
+function resetHintFlow(panel) {
+  rehomeHintButtons(panel);
+  if (panel._hintHost) {
+    panel._hintHost.remove();
+    panel._hintHost = null;
+  }
+  resetHintButtons(panel);
 }
 
 function resetCurrentAttempt(panel) {
@@ -1004,9 +1653,6 @@ function resetCurrentAttempt(panel) {
 function setPanelResults(panel, data = {}) {
   const normalized = normalizeAnalysis(data);
 
-  setElementText(panel.analysis, normalized.analysis, EMPTY_PANEL_RESULTS.analysis);
-  setElementText(panel.mistake, normalized.mistake, EMPTY_PANEL_RESULTS.mistake);
-  setElementText(panel.progress, normalized.progress, EMPTY_PANEL_RESULTS.progress);
   panel.hint1.textContent = normalized.hint1;
   panel.hint2.textContent = normalized.hint2;
   panel.hint3.textContent = normalized.hint3;
@@ -1014,30 +1660,80 @@ function setPanelResults(panel, data = {}) {
   resetHintFlow(panel);
 
   if (hasText(normalized.hint1)) {
+    mountHintHost(panel);
     panel.hint1Button.classList.remove("cb-hidden");
   }
 }
 
+async function appendSequentialAnalysis(panel, normalized) {
+  const segments = [
+    { label: "Analysis", text: normalized.analysis, fallback: EMPTY_PANEL_RESULTS.analysis },
+    { label: "Mistake", text: normalized.mistake, fallback: EMPTY_PANEL_RESULTS.mistake },
+    { label: "Progress", text: normalized.progress, fallback: EMPTY_PANEL_RESULTS.progress },
+  ];
+
+  for (const segment of segments) {
+    const value = hasText(segment.text) ? segment.text.trim() : segment.fallback;
+    appendAiMessage(panel, value, { label: segment.label });
+    scrollChatToBottom(panel);
+    await delay(200);
+  }
+}
+
+function appendHintBubble(panel, level, text) {
+  const wrap = document.createElement("div");
+  wrap.className = "cb-msg cb-msg-row";
+  wrap.dataset.cbTurn = "";
+
+  const av = document.createElement("div");
+  av.className = "cb-avatar cb-avatar-ai";
+  av.setAttribute("aria-hidden", "true");
+  av.innerHTML = CB_ICON_BRAIN;
+
+  const outer = document.createElement("div");
+  outer.style.maxWidth = "calc(100% - 38px)";
+  const box = document.createElement("div");
+  box.className = "cb-hint-reveal";
+  const title = document.createElement("p");
+  title.className = "cb-hint-title";
+  title.textContent = `Hint ${level}`;
+  const p = document.createElement("p");
+  p.className = "cb-section-text";
+  p.style.fontSize = "14px";
+  p.textContent = text;
+  box.appendChild(title);
+  box.appendChild(p);
+  outer.appendChild(box);
+
+  wrap.appendChild(av);
+  wrap.appendChild(outer);
+  panel.chatMessages.appendChild(wrap);
+  scrollChatToBottom(panel);
+}
+
 function revealHint(panel, level) {
+  const hintEl = panel[`hint${level}`];
+  const raw = hintEl?.textContent?.trim() || "";
+  if (!raw) {
+    return;
+  }
+
+  appendHintBubble(panel, level, raw);
+
   if (level === 1) {
     uiState.hintsUsed = 1;
-    panel.hint1Block.classList.remove("cb-hidden");
     panel.hint1Button.classList.add("cb-hidden");
-
     if (panel.hint2.textContent.trim()) {
       panel.hint2Button.classList.remove("cb-hidden");
     }
   } else if (level === 2) {
     uiState.hintsUsed = 2;
-    panel.hint2Block.classList.remove("cb-hidden");
     panel.hint2Button.classList.add("cb-hidden");
-
     if (panel.hint3.textContent.trim()) {
       panel.hint3Button.classList.remove("cb-hidden");
     }
   } else {
     uiState.hintsUsed = 3;
-    panel.hint3Block.classList.remove("cb-hidden");
     panel.hint3Button.classList.add("cb-hidden");
   }
 
@@ -1068,11 +1764,18 @@ function resetStoredProgress(panel) {
 }
 
 async function requestAnalysis(panel) {
+  setPanelOpen(panel, true);
+  ensureWelcomeMessage(panel);
+
   setPanelLoading(panel, true);
-  setPanelStatus(panel, STATUS_MESSAGES.loading);
-  setPanelResults(panel, {});
+  setPanelStatus(panel, "");
   setMentorFeedback(panel, "");
   resetCurrentAttempt(panel);
+  setPanelResults(panel, {});
+  removeTurnMessages(panel);
+
+  appendUserMessage(panel, "Can you review my solution?");
+  showLoadingBubble(panel);
 
   try {
     const data = await getProblemData();
@@ -1081,17 +1784,20 @@ async function requestAnalysis(panel) {
     const code = typeof data.code === "string" ? data.code.trim() : "";
 
     if (!isProblemPage() || !title) {
-      setPanelStatus(panel, STATUS_MESSAGES.invalidPage);
+      removeLoadingBubble(panel);
+      appendAiMessage(panel, STATUS_MESSAGES.invalidPage, { muted: true });
       return;
     }
 
     if (!description) {
-      setPanelStatus(panel, STATUS_MESSAGES.unreadableProblem);
+      removeLoadingBubble(panel);
+      appendAiMessage(panel, STATUS_MESSAGES.unreadableProblem, { muted: true });
       return;
     }
 
     if (!code) {
-      setPanelStatus(panel, STATUS_MESSAGES.noCode);
+      removeLoadingBubble(panel);
+      appendAiMessage(panel, STATUS_MESSAGES.noCode, { muted: true });
       return;
     }
 
@@ -1117,23 +1823,29 @@ async function requestAnalysis(panel) {
     });
 
     const result = await readAnalysisResponse(response);
+    const normalized = normalizeAnalysis(result);
+
+    removeLoadingBubble(panel);
 
     if (!response.ok) {
+      await appendSequentialAnalysis(panel, normalized);
       setPanelResults(panel, result);
       setMentorFeedback(panel, joinMessages(adaptiveFeedback, languageNotice));
-      setPanelStatus(panel, STATUS_MESSAGES.apiFailure);
+      appendAiMessage(panel, STATUS_MESSAGES.apiFailure, { muted: true });
       return;
     }
 
+    await appendSequentialAnalysis(panel, normalized);
     setPanelResults(panel, result);
     saveCurrentAttempt(panel, title, data.difficulty || "");
     setMentorFeedback(panel, joinMessages(adaptiveFeedback, languageNotice));
     setPanelStatus(panel, "");
   } catch (error) {
     console.error("CodeBuddy analysis error:", error);
-    setPanelResults(panel, {});
+    removeLoadingBubble(panel);
+    appendAiMessage(panel, STATUS_MESSAGES.apiFailure, { muted: true });
     setMentorFeedback(panel, "");
-    setPanelStatus(panel, STATUS_MESSAGES.apiFailure);
+    setPanelResults(panel, {});
   } finally {
     setPanelLoading(panel, false);
   }
@@ -1146,104 +1858,131 @@ async function createPanel() {
     await delay(150);
   }
 
-  const existingHost = document.getElementById(PANEL_HOST_ID);
+  document.getElementById("codebuddy-panel-host")?.remove();
+
+  let existingHost = document.getElementById(PANEL_HOST_ID);
   if (existingHost?.shadowRoot) {
-    return getPanelElements(existingHost.shadowRoot);
+    const existingRoot = existingHost.shadowRoot.querySelector(".cb-root");
+    const existingFab = existingHost.shadowRoot.getElementById("cb-fab");
+    if (existingRoot && existingFab) {
+      applyPanelHostSafetyStyles(existingHost);
+      if (existingHost.parentNode !== document.body) {
+        document.body.appendChild(existingHost);
+      }
+      const existingPanel = getPanelElements(existingHost.shadowRoot);
+      ensurePageOverlay(existingPanel);
+      applyPanelHostSafetyStyles(existingHost);
+      return existingPanel;
+    }
+    document.getElementById(OVERLAY_HOST_ID)?.remove();
+    existingHost.remove();
+    existingHost = null;
   }
+
+  document.getElementById(OVERLAY_HOST_ID)?.remove();
 
   const host = document.createElement("div");
   host.id = PANEL_HOST_ID;
+  applyPanelHostSafetyStyles(host);
   document.body.appendChild(host);
 
   const shadowRoot = host.attachShadow({ mode: "open" });
   shadowRoot.innerHTML = `
     <style>${PANEL_CSS}</style>
-    <div class="cb-panel">
-      <div class="cb-stack">
-        <section class="cb-card cb-card-hero">
-          <p class="cb-eyebrow">Guided Mentor</p>
-          <h2 class="cb-title">CodeBuddy &#129504;</h2>
-          <p id="cb-status" class="cb-status" role="status" aria-live="polite"></p>
+    <div class="cb-root">
+      <aside id="cb-drawer" class="cb-drawer" role="dialog" aria-label="CodeBuddy assistant">
+        <header class="cb-header">
+          <div class="cb-brand">
+            <div class="cb-brand-mark">${CB_ICON_BRAIN}</div>
+            <div class="cb-brand-text">
+              <p class="cb-brand-name">CodeBuddy</p>
+              <p class="cb-brand-tag">Smart practice partner</p>
+            </div>
+          </div>
+          <button type="button" id="cb-close" class="cb-icon-btn" aria-label="Close assistant">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+              <path d="M18 6L6 18M6 6l12 12" />
+            </svg>
+          </button>
+        </header>
+
+        <div id="cb-chat-scroll" class="cb-chat">
+          <div id="cb-chat-messages" class="cb-chat-messages" role="log" aria-live="polite" aria-relevant="additions"></div>
+        </div>
+
+        <div class="cb-composer">
+          <p id="cb-hint-usage" class="cb-meta" style="margin:0;text-align:center">Hints revealed: 0 / 3</p>
+          <p id="cb-status" class="cb-status" role="status"></p>
+          <button type="button" id="cb-analyze" class="cb-button cb-analyze">Review my solution</button>
           <p class="cb-note">${PANEL_NOTICES.trust}</p>
-          <button id="cb-analyze" class="cb-button">Analyze Code</button>
-        </section>
+          <div id="cb-hint-button-pool" class="cb-sr-only" aria-hidden="true">
+            <button type="button" id="cb-reveal-hint1" class="cb-button cb-button-secondary cb-hidden">Show hint 1</button>
+            <button type="button" id="cb-reveal-hint2" class="cb-button cb-button-secondary cb-hidden">Show hint 2</button>
+            <button type="button" id="cb-reveal-hint3" class="cb-button cb-button-secondary cb-hidden">Show hint 3</button>
+          </div>
+        </div>
 
-        <section class="cb-section">
-          <h3 class="cb-section-title">Analysis</h3>
-          <p id="cb-analysis" class="cb-section-text"></p>
-        </section>
-
-        <section class="cb-section">
-          <h3 class="cb-section-title">Mistake</h3>
-          <p id="cb-mistake" class="cb-section-text"></p>
-        </section>
-
-        <section class="cb-section">
-          <h3 class="cb-section-title">Progress</h3>
-          <p id="cb-progress" class="cb-section-text"></p>
+        <div class="cb-footer">
           <p id="cb-feedback" class="cb-feedback cb-hidden"></p>
-        </section>
-
-        <section class="cb-section cb-hints">
-          <div class="cb-section-header">
-            <h3 class="cb-section-title">Hints</h3>
-            <p id="cb-hint-usage" class="cb-meta">Hints used: 0 / 3</p>
-          </div>
-
-          <button id="cb-reveal-hint1" class="cb-button cb-button-secondary cb-hidden">
-            Reveal Hint 1
-          </button>
-          <div id="cb-hint1-block" class="cb-hint cb-hidden">
-            <h4 class="cb-hint-title">Hint 1</h4>
-            <p id="cb-hint1" class="cb-section-text"></p>
-          </div>
-
-          <button id="cb-reveal-hint2" class="cb-button cb-button-secondary cb-hidden">
-            Reveal Hint 2
-          </button>
-          <div id="cb-hint2-block" class="cb-hint cb-hidden">
-            <h4 class="cb-hint-title">Hint 2</h4>
-            <p id="cb-hint2" class="cb-section-text"></p>
-          </div>
-
-          <button id="cb-reveal-hint3" class="cb-button cb-button-secondary cb-hidden">
-            Reveal Hint 3
-          </button>
-          <div id="cb-hint3-block" class="cb-hint cb-hidden">
-            <h4 class="cb-hint-title">Hint 3</h4>
-            <p id="cb-hint3" class="cb-section-text"></p>
-          </div>
-        </section>
-
-        <section class="cb-section">
-          <h3 class="cb-section-title">Your Progress</h3>
-          <div class="cb-progress-grid">
-            <div class="cb-stat-row">
-              <span class="cb-meta">Problems Attempted</span>
-              <span id="cb-total-problems" class="cb-section-text">0</span>
+          <details class="cb-details">
+            <summary>Your stats &amp; history</summary>
+            <div class="cb-details-body">
+              <div class="cb-progress-grid">
+                <div class="cb-stat-row">
+                  <span class="cb-meta">Problems attempted</span>
+                  <span id="cb-total-problems" class="cb-section-text">0</span>
+                </div>
+                <div class="cb-stat-row">
+                  <span class="cb-meta">Total hints used</span>
+                  <span id="cb-total-hints" class="cb-section-text">0</span>
+                </div>
+                <div class="cb-stat-row">
+                  <span class="cb-meta">Avg hints / problem</span>
+                  <span id="cb-average-hints" class="cb-section-text">0</span>
+                </div>
+              </div>
+              <div id="cb-history-list" class="cb-history-list"></div>
+              <button type="button" id="cb-reset-progress" class="cb-button cb-button-secondary">Reset progress</button>
             </div>
-            <div class="cb-stat-row">
-              <span class="cb-meta">Total Hints Used</span>
-              <span id="cb-total-hints" class="cb-section-text">0</span>
-            </div>
-            <div class="cb-stat-row">
-              <span class="cb-meta">Avg Hints per Problem</span>
-              <span id="cb-average-hints" class="cb-section-text">0</span>
-            </div>
-          </div>
-          <div>
-            <h4 class="cb-hint-title">Recent Attempts</h4>
-            <div id="cb-history-list" class="cb-history-list"></div>
-          </div>
-          <button id="cb-reset-progress" class="cb-button cb-button-secondary cb-reset">
-            Reset Progress
-          </button>
-        </section>
+          </details>
+        </div>
+
+        <div class="cb-sr-only">
+          <span id="cb-hint1"></span>
+          <span id="cb-hint2"></span>
+          <span id="cb-hint3"></span>
+        </div>
+      </aside>
+
+      <div class="cb-fab-wrap">
+        <span class="cb-fab-tooltip" role="tooltip">Need help?</span>
+        <button
+          type="button"
+          id="cb-fab"
+          class="cb-fab"
+          aria-expanded="false"
+          aria-controls="cb-drawer"
+          aria-label="Need help? Open CodeBuddy"
+        >
+          ${CB_ICON_BRAIN}
+        </button>
       </div>
     </div>
   `;
 
   const panel = getPanelElements(shadowRoot);
+  ensurePageOverlay(panel);
+  applyPanelHostSafetyStyles(host);
+
+  const closePanel = () => setPanelOpen(panel, false);
+
+  panel.fab.addEventListener("click", () => {
+    toggleDrawer(panel);
+  });
+
+  panel.closeBtn.addEventListener("click", () => {
+    closePanel();
+  });
 
   panel.button.addEventListener("click", () => {
     requestAnalysis(panel);
@@ -1265,11 +2004,22 @@ async function createPanel() {
     resetStoredProgress(panel);
   });
 
+  document.addEventListener(
+    "keydown",
+    (event) => {
+      if (event.key === "Escape" && panel.root?.classList.contains("cb-open")) {
+        closePanel();
+      }
+    },
+    true
+  );
+
   resetCurrentAttempt(panel);
   setPanelResults(panel, {});
   setPanelLoading(panel, false);
   renderProgress(panel, loadAttempts());
   setPanelStatus(panel, "");
+  ensureWelcomeMessage(panel);
 
   return panel;
 }
@@ -1296,10 +2046,37 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   }
 });
 
-(async () => {
-  try {
-    await createPanel();
-  } catch (error) {
-    console.error("Failed to create CodeBuddy panel:", error);
+function init() {
+  console.log("CodeBuddy: init");
+  if (document.getElementById(PANEL_HOST_ID)) {
+    return;
   }
-})();
+
+  (async () => {
+    try {
+      await createPanel();
+      console.log("CodeBuddy: panel created");
+    } catch (error) {
+      console.error("CodeBuddy: createPanel failed", error);
+    }
+  })();
+
+  setTimeout(() => {
+    if (!document.getElementById(PANEL_HOST_ID)) {
+      console.log("Recreating panel...");
+      (async () => {
+        try {
+          await createPanel();
+        } catch (error) {
+          console.error("CodeBuddy: recreate failed", error);
+        }
+      })();
+    }
+  }, 1000);
+}
+
+if (document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", init);
+} else {
+  init();
+}
