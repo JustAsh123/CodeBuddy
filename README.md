@@ -4,6 +4,9 @@
 
 CodeBuddy is a Chrome extension that helps you solve LeetCode problems by **guiding your thinking**, not giving away answers.
 
+### Get it from:
+https://code-buddy.w3spaces.com/
+
 ---
 
 ## 🎥 Demo
