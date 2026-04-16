@@ -1,4 +1,4 @@
-const BACKEND_URL = "http://localhost:3000/get-hints";
+const BACKEND_URL = "https://code-buddy-six-pearl.vercel.app/get-hints";
 const PROBLEM_URL_PREFIX = "https://leetcode.com/problems/";
 const ANALYSIS_TIMEOUT_MS = 15000;
 const PANEL_HOST_ID = "codebuddy-panel";
@@ -9,15 +9,15 @@ const TITLE_SELECTORS = [
   '[data-cy="question-title"]',
   'main [data-cy="question-title"]',
   'h1 a[href*="/problems/"]',
-  'main h1',
+  "main h1",
   'main [role="heading"]',
 ];
 
 const DESCRIPTION_SELECTORS = [
   '[data-track-load="description_content"]',
   '[data-key="description-content"]',
-  'main article',
-  'article',
+  "main article",
+  "article",
   'main [role="main"] article',
   'main [role="main"] section',
 ];
@@ -59,13 +59,17 @@ const BUTTON_LABELS = {
 const STATUS_MESSAGES = {
   loading: "",
   invalidPage: "Open a LeetCode problem page and I can help you there.",
-  unreadableProblem: "I couldn’t read the problem text. Try a quick refresh and we’ll try again.",
+  unreadableProblem:
+    "I couldn’t read the problem text. Try a quick refresh and we’ll try again.",
   noCode: "Write a bit of code in the editor first — then I can take a look.",
-  apiFailure: "Something went wrong on my side. Give it another try in a moment.",
+  apiFailure:
+    "Something went wrong on my side. Give it another try in a moment.",
 };
 const EMPTY_PANEL_RESULTS = {
-  analysis: "Tap “Review my solution” and I’ll walk through your code with you.",
-  mistake: "When you’re ready, I’ll share what might be going sideways — gently.",
+  analysis:
+    "Tap “Review my solution” and I’ll walk through your code with you.",
+  mistake:
+    "When you’re ready, I’ll share what might be going sideways — gently.",
   progress: "We’ll celebrate what’s working and note what to tighten next.",
 };
 const PANEL_NOTICES = {
@@ -717,7 +721,10 @@ function joinMessages(...messages) {
 }
 
 function waitForDomReady() {
-  if (document.readyState === "complete" || document.readyState === "interactive") {
+  if (
+    document.readyState === "complete" ||
+    document.readyState === "interactive"
+  ) {
     return Promise.resolve();
   }
 
@@ -774,9 +781,14 @@ function extractDescription() {
   let description = findLongestText(DESCRIPTION_SELECTORS);
 
   if (!description) {
-    const fallbackBlocks = Array.from(document.querySelectorAll("main div, main section"))
+    const fallbackBlocks = Array.from(
+      document.querySelectorAll("main div, main section"),
+    )
       .map((element) => getElementText(element))
-      .filter((text) => text.length > 120 && /Example|Constraints|Input|Output/.test(text))
+      .filter(
+        (text) =>
+          text.length > 120 && /Example|Constraints|Input|Output/.test(text),
+      )
       .sort((a, b) => b.length - a.length);
 
     description = fallbackBlocks[0] || "";
@@ -808,7 +820,9 @@ function extractCode() {
 }
 
 function extractDifficulty() {
-  const difficultyMatch = Array.from(document.querySelectorAll("main span, main div, main p"))
+  const difficultyMatch = Array.from(
+    document.querySelectorAll("main span, main div, main p"),
+  )
     .map((element) => getElementText(element))
     .find((text) => text === "Easy" || text === "Medium" || text === "Hard");
 
@@ -873,11 +887,18 @@ function inferLanguageFromCode(code = "") {
     return "Python";
   }
 
-  if (/#include\s*</.test(code) || /\bstd::/.test(code) || /\busing namespace std\b/.test(code)) {
+  if (
+    /#include\s*</.test(code) ||
+    /\bstd::/.test(code) ||
+    /\busing namespace std\b/.test(code)
+  ) {
     return "C++";
   }
 
-  if (/\bSystem\.out\.println\(/.test(code) || /\bpublic\s+class\b/.test(code)) {
+  if (
+    /\bSystem\.out\.println\(/.test(code) ||
+    /\bpublic\s+class\b/.test(code)
+  ) {
     return "Java";
   }
 
@@ -885,7 +906,10 @@ function inferLanguageFromCode(code = "") {
     return "JavaScript";
   }
 
-  if (/\binterface\s+\w+/.test(code) || /:\s*(number|string|boolean|unknown|any)\b/.test(code)) {
+  if (
+    /\binterface\s+\w+/.test(code) ||
+    /:\s*(number|string|boolean|unknown|any)\b/.test(code)
+  ) {
     return "TypeScript";
   }
 
@@ -1020,12 +1044,18 @@ function sanitizeAttempt(attempt) {
 
   return {
     problem: typeof attempt.problem === "string" ? attempt.problem : "",
-    difficulty: typeof attempt.difficulty === "string" ? attempt.difficulty : "",
+    difficulty:
+      typeof attempt.difficulty === "string" ? attempt.difficulty : "",
     hints_used:
-      typeof attempt.hints_used === "number" && attempt.hints_used >= 0 && attempt.hints_used <= 3
+      typeof attempt.hints_used === "number" &&
+      attempt.hints_used >= 0 &&
+      attempt.hints_used <= 3
         ? attempt.hints_used
         : 0,
-    attempts: Number.isInteger(attempt.attempts) && attempt.attempts > 0 ? attempt.attempts : 1,
+    attempts:
+      Number.isInteger(attempt.attempts) && attempt.attempts > 0
+        ? attempt.attempts
+        : 1,
     timestamp: typeof attempt.timestamp === "number" ? attempt.timestamp : 0,
   };
 }
@@ -1060,7 +1090,7 @@ function loadAttempts() {
 
     for (const attempt of sanitizedAttempts) {
       const existingAttemptIndex = dedupedAttempts.findIndex(
-        (entry) => entry.problem === attempt.problem
+        (entry) => entry.problem === attempt.problem,
       );
 
       if (existingAttemptIndex === -1) {
@@ -1070,7 +1100,9 @@ function loadAttempts() {
 
       const existingAttempt = dedupedAttempts[existingAttemptIndex];
       const latestAttempt =
-        attempt.timestamp >= existingAttempt.timestamp ? attempt : existingAttempt;
+        attempt.timestamp >= existingAttempt.timestamp
+          ? attempt
+          : existingAttempt;
 
       dedupedAttempts[existingAttemptIndex] = {
         problem: latestAttempt.problem,
@@ -1098,7 +1130,9 @@ function saveAttempt(problem, difficulty, hintsUsed, timestamp) {
   }
 
   const attempts = loadAttempts();
-  const existingAttemptIndex = attempts.findIndex((attempt) => attempt.problem === problem);
+  const existingAttemptIndex = attempts.findIndex(
+    (attempt) => attempt.problem === problem,
+  );
 
   if (existingAttemptIndex === -1) {
     attempts.push({
@@ -1130,7 +1164,9 @@ function updateCurrentAttemptHints(hintsUsed) {
   }
 
   const attempts = loadAttempts();
-  const attemptIndex = attempts.findIndex((attempt) => attempt.problem === uiState.currentProblem);
+  const attemptIndex = attempts.findIndex(
+    (attempt) => attempt.problem === uiState.currentProblem,
+  );
 
   if (attemptIndex === -1) {
     return attempts;
@@ -1139,7 +1175,8 @@ function updateCurrentAttemptHints(hintsUsed) {
   attempts[attemptIndex] = {
     ...attempts[attemptIndex],
     hints_used: hintsUsed,
-    timestamp: uiState.currentAttemptTimestamp || attempts[attemptIndex].timestamp,
+    timestamp:
+      uiState.currentAttemptTimestamp || attempts[attemptIndex].timestamp,
   };
 
   saveAttempts(attempts);
@@ -1156,7 +1193,10 @@ function calculateAverageHints(totalHintsUsed, totalProblems) {
 
 function calculateStats(attempts) {
   const totalProblems = attempts.length;
-  const totalHintsUsed = attempts.reduce((sum, attempt) => sum + attempt.hints_used, 0);
+  const totalHintsUsed = attempts.reduce(
+    (sum, attempt) => sum + attempt.hints_used,
+    0,
+  );
   const averageHints = calculateAverageHints(totalHintsUsed, totalProblems);
 
   return {
@@ -1198,10 +1238,7 @@ function getMentorStyleInstructions(skillLevel) {
   }
 
   if (skillLevel === "intermediate") {
-    return [
-      "- Give balanced hints",
-      "- Use moderate guidance",
-    ].join("\n");
+    return ["- Give balanced hints", "- Use moderate guidance"].join("\n");
   }
 
   return [
@@ -1213,7 +1250,8 @@ function getMentorStyleInstructions(skillLevel) {
 
 function buildPersonalizedApproach(userProfile, userApproach = "") {
   const sections = [];
-  const trimmedApproach = typeof userApproach === "string" ? userApproach.trim() : "";
+  const trimmedApproach =
+    typeof userApproach === "string" ? userApproach.trim() : "";
 
   if (trimmedApproach) {
     sections.push(trimmedApproach);
@@ -1228,14 +1266,16 @@ function buildPersonalizedApproach(userProfile, userApproach = "") {
       "",
       "Mentor Guidance:",
       getMentorStyleInstructions(userProfile.skill_level),
-    ].join("\n")
+    ].join("\n"),
   );
 
   return sections.join("\n\n");
 }
 
 function isHintUsageImproving(attempts) {
-  const sortedAttempts = [...attempts].sort((a, b) => a.timestamp - b.timestamp);
+  const sortedAttempts = [...attempts].sort(
+    (a, b) => a.timestamp - b.timestamp,
+  );
 
   if (sortedAttempts.length < 2) {
     return false;
@@ -1249,7 +1289,10 @@ function isHintUsageImproving(attempts) {
     return false;
   }
 
-  return calculateStats(recentAttempts).averageHints < calculateStats(earlierAttempts).averageHints;
+  return (
+    calculateStats(recentAttempts).averageHints <
+    calculateStats(earlierAttempts).averageHints
+  );
 }
 
 function getAdaptiveFeedback(attempts, userProfile) {
@@ -1315,7 +1358,9 @@ function scrollChatToBottom(panel) {
 function removeTurnMessages(panel) {
   rehomeHintButtons(panel);
   panel._hintHost = null;
-  panel.chatMessages.querySelectorAll("[data-cb-turn]").forEach((node) => node.remove());
+  panel.chatMessages
+    .querySelectorAll("[data-cb-turn]")
+    .forEach((node) => node.remove());
   removeLoadingBubble(panel);
 }
 
@@ -1394,9 +1439,12 @@ function showLoadingBubble(panel) {
   const typing = document.createElement("span");
   typing.className = "cb-typing";
   typing.setAttribute("aria-hidden", "true");
-  typing.innerHTML = '<span class="cb-typing-dot"></span><span class="cb-typing-dot"></span><span class="cb-typing-dot"></span>';
+  typing.innerHTML =
+    '<span class="cb-typing-dot"></span><span class="cb-typing-dot"></span><span class="cb-typing-dot"></span>';
   const line = document.createElement("div");
-  line.appendChild(document.createTextNode("Taking a thoughtful look at your solution "));
+  line.appendChild(
+    document.createTextNode("Taking a thoughtful look at your solution "),
+  );
   line.appendChild(typing);
   bubble.appendChild(label);
   bubble.appendChild(line);
@@ -1510,7 +1558,7 @@ function ensureWelcomeMessage(panel) {
   appendAiMessage(
     panel,
     "Hi — I'm CodeBuddy. When you're ready, tap “Review my solution” and I'll go through your code in order: what I see, what to watch for, then hints only if you want them.",
-    { isWelcome: true }
+    { isWelcome: true },
   );
 }
 
@@ -1520,7 +1568,9 @@ function setPanelStatus(panel, message) {
 
 function setPanelLoading(panel, isLoading) {
   panel.button.disabled = isLoading;
-  panel.button.textContent = isLoading ? BUTTON_LABELS.loading : BUTTON_LABELS.idle;
+  panel.button.textContent = isLoading
+    ? BUTTON_LABELS.loading
+    : BUTTON_LABELS.idle;
   panel.button.setAttribute("aria-busy", String(isLoading));
   panel.fab.disabled = isLoading;
   panel.closeBtn.disabled = isLoading;
@@ -1550,7 +1600,9 @@ function renderProgress(panel, attempts = loadAttempts()) {
 
   panel.historyList.innerHTML = "";
 
-  const recentAttempts = [...attempts].sort((a, b) => b.timestamp - a.timestamp).slice(0, 5);
+  const recentAttempts = [...attempts]
+    .sort((a, b) => b.timestamp - a.timestamp)
+    .slice(0, 5);
 
   if (recentAttempts.length === 0) {
     const emptyState = document.createElement("p");
@@ -1667,13 +1719,27 @@ function setPanelResults(panel, data = {}) {
 
 async function appendSequentialAnalysis(panel, normalized) {
   const segments = [
-    { label: "Analysis", text: normalized.analysis, fallback: EMPTY_PANEL_RESULTS.analysis },
-    { label: "Mistake", text: normalized.mistake, fallback: EMPTY_PANEL_RESULTS.mistake },
-    { label: "Progress", text: normalized.progress, fallback: EMPTY_PANEL_RESULTS.progress },
+    {
+      label: "Analysis",
+      text: normalized.analysis,
+      fallback: EMPTY_PANEL_RESULTS.analysis,
+    },
+    {
+      label: "Mistake",
+      text: normalized.mistake,
+      fallback: EMPTY_PANEL_RESULTS.mistake,
+    },
+    {
+      label: "Progress",
+      text: normalized.progress,
+      fallback: EMPTY_PANEL_RESULTS.progress,
+    },
   ];
 
   for (const segment of segments) {
-    const value = hasText(segment.text) ? segment.text.trim() : segment.fallback;
+    const value = hasText(segment.text)
+      ? segment.text.trim()
+      : segment.fallback;
     appendAiMessage(panel, value, { label: segment.label });
     scrollChatToBottom(panel);
     await delay(200);
@@ -1780,7 +1846,8 @@ async function requestAnalysis(panel) {
   try {
     const data = await getProblemData();
     const title = typeof data.title === "string" ? data.title.trim() : "";
-    const description = typeof data.description === "string" ? data.description.trim() : "";
+    const description =
+      typeof data.description === "string" ? data.description.trim() : "";
     const code = typeof data.code === "string" ? data.code.trim() : "";
 
     if (!isProblemPage() || !title) {
@@ -1791,7 +1858,9 @@ async function requestAnalysis(panel) {
 
     if (!description) {
       removeLoadingBubble(panel);
-      appendAiMessage(panel, STATUS_MESSAGES.unreadableProblem, { muted: true });
+      appendAiMessage(panel, STATUS_MESSAGES.unreadableProblem, {
+        muted: true,
+      });
       return;
     }
 
@@ -1804,7 +1873,10 @@ async function requestAnalysis(panel) {
     const attempts = loadAttempts();
     const userProfile = buildUserProfile(attempts);
     const adaptiveFeedback = getAdaptiveFeedback(attempts, userProfile);
-    const programmingLanguage = normalizeLanguage(data.language) || inferLanguageFromCode(code) || "Unknown";
+    const programmingLanguage =
+      normalizeLanguage(data.language) ||
+      inferLanguageFromCode(code) ||
+      "Unknown";
     const languageNotice = getLanguageNotice(programmingLanguage);
 
     const response = await fetchWithTimeout(BACKEND_URL, {
@@ -1817,7 +1889,7 @@ async function requestAnalysis(panel) {
         user_code: code,
         user_approach: buildPersonalizedApproach(
           userProfile,
-          `Programming Language: ${programmingLanguage}`
+          `Programming Language: ${programmingLanguage}`,
         ),
       }),
     });
@@ -2011,7 +2083,7 @@ async function createPanel() {
         closePanel();
       }
     },
-    true
+    true,
   );
 
   resetCurrentAttempt(panel);
